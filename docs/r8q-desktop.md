@@ -289,7 +289,7 @@ remains a separate gate.
 ## Idle blanking and side button
 
 The phone profile starts `hypridle` with
-`/usr/share/r8q/omarchy/phone-hypridle.conf`. After 120 seconds without seat
+`/usr/share/r8q/omarchy/phone-hypridle.conf`. After 300 seconds without seat
 input it disables DPMS on `DSI-1`. The Lua binds a short Side/Power press on
 release to a delayed DPMS toggle: one press blanks the display, another wakes
 it. Automatic key/mouse wake and hypridle's `on-resume` action are disabled
@@ -324,7 +324,7 @@ hyprctl dispatch 'hl.dsp.dpms({ monitor = "DSI-1", action = "enable" })'
 
 An SSH shell must run that command as `alarm` with the current compositor's
 `XDG_RUNTIME_DIR=/run/r8q-desktop` and `HYPRLAND_INSTANCE_SIGNATURE`. Record
-the real 120-second idle transition and physical Side/Power wake separately
+the real 300-second idle transition and physical Side/Power wake separately
 from direct dispatcher tests. Recheck both SSH routes and the desktop PID after
 testing. The current file baseline is `/root/r8q-desktop-screen-off.sha256`;
 the wallpaper baseline is retained as a historical receipt. Backups and
