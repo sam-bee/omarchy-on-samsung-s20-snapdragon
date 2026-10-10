@@ -150,9 +150,11 @@ The tracked DTS compiles to the deployed DTB hash
 Direct ALSA and desktop PipeWire tests verified stereo PCM, both physical DSP
 RUNNING states, factory readbacks, mute/power-down, and repeated idle wake.
 The final clean reboot restored both hardware gains, all 36 owned modules and
-the saved 60% desktop volume; both USB and Wi-Fi SSH remained available. Test
-tones were sent through the desktop. Human hearing confirmation is still
-pending and is separate from the successful PCM/DSP tests.
+the saved 60% desktop volume; both USB and Wi-Fi SSH remained available. The user accepted the listening check on 2026-10-11 after louder, separate
+top-receiver and bottom-speaker tones were played through the desktop. The test
+used four-second tones at a peak of 16384, about 12 dB above the initial test,
+with the tested amplifier settings retained. Previous desktop volume and mute
+were restored afterward.
 
 The software/mixer settings follow the official
 [PipeWire property reference](https://docs.pipewire.org/page_man_pipewire-props_7.html).

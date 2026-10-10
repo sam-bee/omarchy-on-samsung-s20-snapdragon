@@ -43,7 +43,7 @@ into.
 | 13 | **KDE Plasma Mobile** — `sddm` autologin → mobile shell on the Adreno, ~12 s cold boot (GNOME still installed as a fallback) | ✅ |
 | 14 | **CPU wedge root-caused** — the "phone dies under load" bug is `cpu7` never returning from `cpu-sleep-1-0` power collapse; that idle state is now disabled on cpus 4-7 | ✅ fix holding (first 50 min session clean; longer soak still welcome) |
 
-| 15 | **Internal speaker playback** — protected CS35L41 stereo output through Q6AFE/ADSP and desktop PipeWire; survives reboot | PCM/DSP and startup verified; human hearing pending |
+| 15 | **Internal speaker playback** — protected CS35L41 stereo output through Q6AFE/ADSP and desktop PipeWire; survives reboot | Playback, startup and user listening check passed |
 
 See the [**Roadmap**](#roadmap) below for what's next (Bluetooth, USB host mode,
 capture audio, a greeter/lock screen). Internal speaker details are in
