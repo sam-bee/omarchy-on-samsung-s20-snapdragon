@@ -494,9 +494,18 @@ The fresh battery-only boot `548b2bc6-dacb-4be3-9fed-dddea553049d` retained
 `disable=1` and `usage=0` on all eight CPUs, with WFI and CPU accounting
 advancing. This closes the window before the existing userspace workaround
 runs. It does not repair the deep-idle implementation or establish suspend.
-The initial candidate boot/peripheral checks passed; final candidate acceptance
-is pending cable recovery and operator screen-wake checks. Protected desktop,
-audio, graphics, Wi-Fi, standalone-startup and new standby manifests passed.
+The initial candidate boot/peripheral checks passed. Battery depletion later
+interrupted manual acceptance; on 11 October the next charging/low-capacity
+boot failed the guard's battery-only health policy, and the guard restored the
+verified original kernel/DTB pair with one ordinary reboot. This is expected
+rollback, not evidence of a candidate kernel fault. The phone is currently on
+the original `#5` kernel with the userspace deep-idle workaround and accepted
+Wi-Fi policy. Protected desktop, audio, graphics, Wi-Fi, standalone-startup and
+standby manifests passed again after recovery. The registration-time CPU
+mitigation still needs a fresh guarded trial, cable recovery and operator
+screen-wake acceptance at adequate battery charge. Retained rollback state
+must be archived and reset before rearming; the first-trial installer must
+not be rerun against its old markers.
 
 A temporary USB runtime-PM gate detached the configfs gadget and requested
 autosuspend on the DWC3 child, PHY and legacy QCOM parent while on battery.

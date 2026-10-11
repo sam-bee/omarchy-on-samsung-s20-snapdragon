@@ -56,7 +56,10 @@ for diagnostics while architectural WFI and its counters remain available.
 A fresh battery-only candidate boot (`548b2bc6-dacb-4be3-9fed-dddea553049d`)
 reported `disable=1` and `usage=0` for state1 on all eight CPUs from the
 startup acceptance check. This is a recoverable mitigation; it does not repair
-the deep-idle implementation or enable suspend.
+the deep-idle implementation or enable suspend. After battery depletion
+interrupted manual acceptance on 11 October, the recovery guard restored the
+previous kernel. The phone currently uses the userspace deep-idle workaround;
+the registration-time mitigation still needs a fresh guarded acceptance trial.
 
 Mu-Silicium is
 flashed to `BOOT`; the ESP is the `cache` partition reformatted vfat (`R8QESP`);
