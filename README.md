@@ -330,8 +330,17 @@ retained unchanged; only values above the cap are lowered, and malformed or
 out-of-range values fail closed. The input setter writes 475000 uA because that
 driver's encoding reads back 500000 uA; the charge setter writes 500000 uA.
 Final readback must equal the retained original value or 500000 uA when lowered.
-The guards, 500000-uA input/charge cap and no-higher-current assumption remain. The
-accepted normal USB-host boots measured mean net current of about +13 mA and
+The guards, 500000-uA input/charge cap and no-higher-current assumption remain.
+
+The cap is a conservative startup policy; source-appropriate charging performance
+is unfinished. After depleted-battery recovery on 11 October, the gauge gained
+1.608 Ah from 15% to 55% over 7.60 hours, about 211.5 mA net on average.
+The current laptop boot inherited 500000/500000 uA and required no cap writes.
+These endpoint readings show slow net accumulation; they do not measure input
+power or establish charging speed across source types. Startup acceptance
+does not close the charging-performance work.
+
+The accepted normal USB-host boots measured mean net current of about +13 mA and
 +22 mA, with charge increasing by about 5,000 uAh in each six-minute monitor.
 These are idle-desktop observations and do not establish heavy-load headroom.
 Judge net charging from gauge current and accumulated charge over time, rather
