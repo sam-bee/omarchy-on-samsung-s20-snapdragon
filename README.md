@@ -41,7 +41,7 @@ into.
 | 11 | **Battery** — MAX77705 fuel gauge (`max17042`) telemetry **+ charging** (`max77705` MFD + charger) | ✅ normal USB-host, wall-power and battery-only startup accepted; post-bind USB insertion/SSH passed |
 | 12 | **Wi-Fi** — QCA6390 over PCIe via `ath11k_pci` + MHI; `wlp1s0` scans and associates | ✅ |
 | 13 | **KDE Plasma Mobile** — `sddm` autologin → mobile shell on the Adreno, ~12 s cold boot (GNOME still installed as a fallback) | ✅ |
-| 14 | **CPU wedge root-caused** — the "phone dies under load" bug is `cpu7` never returning from `cpu-sleep-1-0` power collapse; that idle state is now disabled on cpus 4-7 | ✅ fix holding (first 50 min session clean; longer soak still welcome) |
+| 14 | **CPU idle mitigation** — deep state1 is disabled on all eight CPUs; WFI and frequency scaling remain available | ✅ current monitored desktop keeps all eight CPUs live; deep-idle root cause and suspend remain unresolved |
 
 | 15 | **Internal speaker playback** — protected CS35L41 stereo output through Q6AFE/ADSP and desktop PipeWire; survives reboot | Playback, startup and user listening check passed |
 
@@ -238,6 +238,21 @@ built-in panel it is:
   exist, GNOME would otherwise idle- or critical-battery-suspend into that reset.
   A locked system dconf default (`rootfs/etc/dconf/…`) forces every power action to
   `nothing` and disables idle detection.
+
+The October 11 battery comparisons measured 602.6 mA with the display lit
+versus 444.4 mA blank, a 26.3% reduction. With the display blank, Wi-Fi power
+saving reduced a separate repeated comparison from 452.4 to 357.4 mA (21.0%).
+Temperature stayed 24 C, charge movement corroborated both comparisons, and
+Wi-Fi SSH stayed usable. These are bounded measurements with telemetry/UI
+polling, not overnight endurance results. Simpledrm blanking still leaves the
+firmware display powered; native panel shutdown and system sleep remain work.
+
+`r8q-wifi-standby.service` enables the runtime Wi-Fi power-save switch only
+while the display is blank, the charger is offline and battery/link readings
+are healthy. Wake, source insertion, missing telemetry or carrier loss request
+power saving Off. The NetworkManager profile retains Off as the recovery
+default; PCI runtime PM and ASPM are unchanged. See
+[standby policy and acceptance](docs/r8q-desktop.md#wi-fi-standby-policy).
 
 ### Battery
 

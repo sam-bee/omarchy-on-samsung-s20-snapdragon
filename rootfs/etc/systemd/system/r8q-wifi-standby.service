@@ -1,0 +1,16 @@
+[Unit]
+Description=r8q Wi-Fi saving while blank on battery
+Requires=r8q-wifi.service r8q-battery.service
+After=r8q-wifi.service r8q-battery.service NetworkManager.service r8q-desktop.service
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 /usr/local/sbin/r8q-wifi-standby.py
+ExecStopPost=/usr/bin/python3 /usr/local/sbin/r8q-wifi-standby.py --restore-off
+RuntimeDirectory=r8q-wifi-standby
+RuntimeDirectoryMode=0700
+TimeoutStopSec=30
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

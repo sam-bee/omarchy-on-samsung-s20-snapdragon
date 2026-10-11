@@ -447,6 +447,40 @@ The timer, bind flags and DPMS fields follow the official
 [Hyprland dispatcher reference](https://wiki.hypr.land/configuring/core/dispatchers/)
 and [hypridle configuration](https://wiki.hypr.land/Hypr-Ecosystem/hypridle/).
 
+## Wi-Fi standby policy
+
+The phone-local `r8q-wifi-standby.service` changes only
+`iw dev wlp1s0 set power_save on/off`. It enables saving when `DSI-1` reports
+DPMS Off, MAX77705 reports offline/Discharging, the fuel gauge is present and
+healthy (15–100%, 0–40 C, 2.5–4.5 V), and Wi-Fi is associated. It requests Off
+when any condition fails. Display/source/carrier checks run every two seconds;
+association and actual runtime-state checks run every ten seconds. Commands
+have five-second limits, so transitions may take longer if a command stalls.
+Normal exit and separate `ExecStopPost` cleanup both restore Off, with two
+bounded attempts. NetworkManager's saved powersave setting remains `2` (Off).
+No PCI/ASPM, charger-limit, CPU-idle or display policy is changed by this service.
+
+Install the helper at `/usr/local/sbin/r8q-wifi-standby.py` and the unit at
+`/etc/systemd/system/r8q-wifi-standby.service`. Verify the helper/unit hashes,
+reload systemd and test runtime behavior before enabling the unit for boot.
+`/run/r8q-wifi-standby/status.json` records the last decision without SSID/BSSID
+information. Stop or disable the service to return to the saved Off default.
+
+The October 11 repeated blank-display off/on/off/on comparison passed 52
+samples and all CPU, fuel, IRQ, association and restoration checks. Average
+battery draw was 452.4 mA Off versus 357.4 mA On: 95.0 mA/21.0% lower.
+Charge movement independently corroborated approximately 460 versus 360 mA.
+Mean monitored idle power with saving enabled remained about 1.41 W, with
+temperature stable at 24 C. Wi-Fi SSH worked in both enabled phases. This is
+not a long-duration endurance or throughput acceptance claim.
+
+The automatic policy passed dispatcher wake (Off in 0.76 s), reblank (On in
+1.02 s), service-stop cleanup and restart. Actual wall-charger insertion also
+selected Off. Source removal and fresh-boot acceptance are pending. The
+protected additive helper/unit baseline is `/root/r8q-wifi-standby.sha256`;
+phone evidence is in `/root/r8q-standby-20261011/` and local receipts in
+`out/standby-20261011/`.
+
 ## Internal speaker audio
 
 The desktop now starts PipeWire, WirePlumber and pipewire-pulse inside its
