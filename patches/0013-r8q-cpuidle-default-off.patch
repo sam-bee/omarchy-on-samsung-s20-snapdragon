@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: r8q-arch <r8q-arch@example.invalid>
+Date: Sun, 11 Oct 2026 00:00:00 +0100
+Subject: [PATCH] cpuidle: r8q default-off rail power-collapse states
+
+The r8q board keeps its PSCI rail-power-collapse states in the cpuidle
+table, but marks those states default-off from the board DT.  This preserves
+the architectural WFI state and its counters while preventing registration
+from selecting the two states implicated by the standby investigation.
+
+The property is deliberately board-local and changes no PSCI suspend
+parameter or latency value.  The companion r8q DT sets the property on the
+two CPU rail-power-collapse nodes.
+---
+ drivers/cpuidle/dt_idle_states.c                   | 2 ++
+ Documentation/devicetree/bindings/cpu/idle-states.yaml | 7 +++++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/drivers/cpuidle/dt_idle_states.c b/drivers/cpuidle/dt_idle_states.c
+--- a/drivers/cpuidle/dt_idle_states.c
++++ b/drivers/cpuidle/dt_idle_states.c
+@@ -77,6 +77,8 @@ static int init_idle_state(struct device_node *state_node,
+ 		desc = state_node->name;
+ 
+ 	idle_state->flags = CPUIDLE_FLAG_RCU_IDLE;
++	if (of_property_read_bool(state_node, "samsung,r8q-cpuidle-off"))
++		idle_state->flags |= CPUIDLE_FLAG_OFF;
+ 	if (of_property_read_bool(state_node, "local-timer-stop"))
+ 		idle_state->flags |= CPUIDLE_FLAG_TIMER_STOP;
+ 	/*
+diff --git a/Documentation/devicetree/bindings/cpu/idle-states.yaml b/Documentation/devicetree/bindings/cpu/idle-states.yaml
+--- a/Documentation/devicetree/bindings/cpu/idle-states.yaml
++++ b/Documentation/devicetree/bindings/cpu/idle-states.yaml
+@@ -427,6 +427,13 @@
+         description:
+           A string used as a descriptive name for the idle state.
+ 
++      samsung,r8q-cpuidle-off:
++        type: boolean
++        description: |
++          Keep this idle state in the cpuidle table but disable it by default.
++          This is a board-local recovery/diagnostic policy; state0 WFI remains
++          available and state usage counters remain visible.
++
+     additionalProperties: false
+ 
+     required:
+-- 
+2.39.2

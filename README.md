@@ -49,6 +49,15 @@ See the [**Roadmap**](#roadmap) below for what's next (Bluetooth, USB host mode,
 capture audio, a greeter/lock screen). Internal speaker details are in
 [docs/r8q-audio.md](docs/r8q-audio.md).
 
+The CPU idle mitigation marks the two r8q rail-power-collapse states with
+`samsung,r8q-cpuidle-off`. The cpuidle DT parser translates that property to
+`CPUIDLE_FLAG_OFF` during driver registration, so the states remain visible
+for diagnostics while architectural WFI and its counters remain available.
+A fresh battery-only candidate boot (`548b2bc6-dacb-4be3-9fed-dddea553049d`)
+reported `disable=1` and `usage=0` for state1 on all eight CPUs from the
+startup acceptance check. This is a recoverable mitigation; it does not repair
+the deep-idle implementation or enable suspend.
+
 Mu-Silicium is
 flashed to `BOOT`; the ESP is the `cache` partition reformatted vfat (`R8QESP`);
 the rootfs is the `userdata` partition; the kernel is mainline **Linux 7.1.2**.

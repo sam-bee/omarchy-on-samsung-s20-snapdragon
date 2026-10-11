@@ -476,10 +476,40 @@ not a long-duration endurance or throughput acceptance claim.
 
 The automatic policy passed dispatcher wake (Off in 0.76 s), reblank (On in
 1.02 s), service-stop cleanup and restart. Actual wall-charger insertion also
-selected Off. Source removal and fresh-boot acceptance are pending. The
-protected additive helper/unit baseline is `/root/r8q-wifi-standby.sha256`;
+selected Off; physical source removal selected On again. The service also
+started automatically on fresh battery-only boot `548b2bc6…`. That boot passed
+all five dispatcher/cleanup checks: wake selected Off in 2.04 s, reblank
+selected On in 0.77 s, stop restored Off and restart selected On. All eight
+CPUs retained zero deep-state usage throughout. The protected additive helper/unit baseline is `/root/r8q-wifi-standby.sha256`;
 phone evidence is in `/root/r8q-standby-20261011/` and local receipts in
 `out/standby-20261011/`.
+
+## Standby kernel and USB status
+
+Patch `0013-r8q-cpuidle-default-off.patch` translates the board-local
+`samsung,r8q-cpuidle-off` property to `CPUIDLE_FLAG_OFF` when the idle driver
+registers. Both r8q rail-power-collapse states carry the property. The states
+remain visible for diagnostics; WFI and frequency scaling remain available.
+The fresh battery-only boot `548b2bc6-dacb-4be3-9fed-dddea553049d` retained
+`disable=1` and `usage=0` on all eight CPUs, with WFI and CPU accounting
+advancing. This closes the window before the existing userspace workaround
+runs. It does not repair the deep-idle implementation or establish suspend.
+The initial candidate boot/peripheral checks passed; final candidate acceptance
+is pending cable recovery and operator screen-wake checks. Protected desktop,
+audio, graphics, Wi-Fi, standalone-startup and new standby manifests passed.
+
+A temporary USB runtime-PM gate detached the configfs gadget and requested
+autosuspend on the DWC3 child, PHY and legacy QCOM parent while on battery.
+Although 48 samples reported all three suspended, the kernel logged
+`dwc3-qcom-legacy a6f8800.usb: port-1 HS-PHY not in L2`. The gate failed:
+the legacy callback reports success after that failed PHY invariant. All
+cleanup paths restored the devices active and rebound the UDC. USB runtime-PM
+remains at the accepted awake default; the longer USB power comparison is
+unrun. A driver repair must pass a fresh suspend/resume gate and host-cable
+enumeration before an automatic USB saving policy is considered.
+
+Native panel power-off, deep idle/system suspend and discharge endurance remain
+open. The current blank-display Wi-Fi-saving measurement is about 1.41 W.
 
 ## Internal speaker audio
 

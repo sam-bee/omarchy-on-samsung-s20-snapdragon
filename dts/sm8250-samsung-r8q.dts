@@ -4,6 +4,15 @@
 
 #include "sm8250-samsung-common.dtsi"
 
+/* Keep both rail-power-collapse states in the cpuidle table but off by default. */
+&little_cpu_sleep_0 {
+	samsung,r8q-cpuidle-off;
+};
+
+&big_cpu_sleep_0 {
+	samsung,r8q-cpuidle-off;
+};
+
 / {
 	model = "Samsung Galaxy S20 FE";
 	compatible = "samsung,r8q", "qcom,sm8250";
