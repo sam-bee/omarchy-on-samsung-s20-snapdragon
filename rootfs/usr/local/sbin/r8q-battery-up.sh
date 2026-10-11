@@ -329,12 +329,30 @@ validate_charger_telemetry() {
     [ -d "$supply" ] || die 'charger power supply is missing'
     health=$(read_trimmed "$supply/health" 2>/dev/null || true)
     online=$(read_trimmed "$supply/online" 2>/dev/null || true)
-    [ "$health" = Good ] || die "charger health is not Good: $health"
+    status=$(read_trimmed "$supply/status" 2>/dev/null || true)
     case "$online" in
         0|1) ;;
         *) die "charger online is not 0/1: $online" ;;
     esac
-    note "charger_plausibility=health:$health online:$online"
+    case "$status" in
+        Charging|Discharging|"Not charging"|Full|Unknown) ;;
+        *) die "invalid charger status: $status" ;;
+    esac
+    # The pinned driver skips VBUS health when offline and reports the battery
+    # detail instead.  Its unplugged no-fault path may therefore be
+    # "Unspecified failure"; require the independent fuel-gauge gate above and
+    # a Discharging status before accepting that source-aware result.
+    if [ "$online" = 1 ]; then
+        [ "$health" = Good ] || die "charger health is not Good while online: $health"
+    else
+        case "$health" in
+            Good|"Unspecified failure") ;;
+            *) die "unexpected offline charger health: $health" ;;
+        esac
+        [ "$status" = Discharging ] || \
+            die "offline charger status is not Discharging: $status"
+    fi
+    note "charger_plausibility=health:$health online:$online status:$status"
     dump_supply max77705-charger
 }
 
@@ -354,25 +372,27 @@ enforce_charge_current_cap() {
 
     input_path=/sys/class/power_supply/max77705-charger/input_current_limit
     charge_path=/sys/class/power_supply/max77705-charger/constant_charge_current
-    # Read and validate both inherited values before making either write.  A
-    # malformed, missing, below-cap, or outside-driver-range value leaves the
-    # charger untouched and forces the normal reboot rollback boundary.
+    # Read and validate both inherited values before making either write.  The
+    # 500,000-uA policy is a ceiling: valid lower inherited settings are
+    # preserved, while malformed, missing, or outside-driver-range values
+    # leave the charger untouched and force the normal reboot rollback
+    # boundary.
     input_limit=$(read_trimmed "$input_path" 2>/dev/null || true)
     charge_current=$(read_trimmed "$charge_path" 2>/dev/null || true)
     require_range input_current_limit_uA "$input_limit" "$CURRENT_PROPERTY_MIN_UA" "$CURRENT_PROPERTY_MAX_UA"
     require_range constant_charge_current_uA "$charge_current" "$CURRENT_PROPERTY_MIN_UA" "$CURRENT_PROPERTY_MAX_UA"
-    [ "$input_limit" -ge "$CURRENT_LIMIT_CAP_UA" ] || \
-        die "input_current_limit_uA is below conservative cap: $input_limit"
-    [ "$charge_current" -ge "$CURRENT_LIMIT_CAP_UA" ] || \
-        die "constant_charge_current_uA is below conservative cap: $charge_current"
 
     input_write=none
     charge_write=none
+    input_expected=$input_limit
+    charge_expected=$charge_current
     if [ "$input_limit" -gt "$CURRENT_LIMIT_CAP_UA" ]; then
         input_write=$INPUT_LIMIT_WRITE_UA
+        input_expected=$CURRENT_LIMIT_CAP_UA
     fi
     if [ "$charge_current" -gt "$CURRENT_LIMIT_CAP_UA" ]; then
         charge_write=$CHARGE_CURRENT_WRITE_UA
+        charge_expected=$CURRENT_LIMIT_CAP_UA
     fi
 
     # Order matters: lower the input budget first, then the battery charge
@@ -381,8 +401,8 @@ enforce_charge_current_cap() {
         write_sysfs_value "$input_write" "$input_path" || \
             die "failed to write input_current_limit_uA=$input_write"
         input_readback=$(read_trimmed "$input_path" 2>/dev/null || true)
-        [ "$input_readback" = "$CURRENT_LIMIT_CAP_UA" ] || \
-            die "input_current_limit_uA readback is not $CURRENT_LIMIT_CAP_UA: $input_readback"
+        [ "$input_readback" = "$input_expected" ] || \
+            die "input_current_limit_uA readback is not $input_expected: $input_readback"
     fi
     if [ "$charge_write" != none ]; then
         write_sysfs_value "$charge_write" "$charge_path" || \
@@ -391,11 +411,11 @@ enforce_charge_current_cap() {
 
     input_readback=$(read_trimmed "$input_path" 2>/dev/null || true)
     charge_readback=$(read_trimmed "$charge_path" 2>/dev/null || true)
-    [ "$input_readback" = "$CURRENT_LIMIT_CAP_UA" ] || \
-        die "input_current_limit_uA readback is not $CURRENT_LIMIT_CAP_UA: $input_readback"
-    [ "$charge_readback" = "$CURRENT_LIMIT_CAP_UA" ] || \
-        die "constant_charge_current_uA readback is not $CURRENT_LIMIT_CAP_UA: $charge_readback"
-    note "current_limit_policy=conservative_cap cap_uA=$CURRENT_LIMIT_CAP_UA input_inherited_uA=$input_limit charge_inherited_uA=$charge_current input_write_uA=$input_write charge_write_uA=$charge_write input_readback_uA=$input_readback charge_readback_uA=$charge_readback"
+    [ "$input_readback" = "$input_expected" ] || \
+        die "input_current_limit_uA readback is not $input_expected: $input_readback"
+    [ "$charge_readback" = "$charge_expected" ] || \
+        die "constant_charge_current_uA readback is not $charge_expected: $charge_readback"
+    note "current_limit_policy=conservative_cap cap_uA=$CURRENT_LIMIT_CAP_UA input_inherited_uA=$input_limit charge_inherited_uA=$charge_current input_write_uA=$input_write charge_write_uA=$charge_write input_expected_uA=$input_expected charge_expected_uA=$charge_expected input_readback_uA=$input_readback charge_readback_uA=$charge_readback"
 }
 
 require_no_active_compositor() {

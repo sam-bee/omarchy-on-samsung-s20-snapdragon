@@ -38,7 +38,7 @@ into.
 | 8 | **Touchscreen** — STM FTS5CU56A multitouch, working under Plasma Mobile and GNOME; the Zinitix ZT7650 variant works too | ✅ |
 | 9 | **Faster boot** — console `loglevel=3` (dropped `ignore_loglevel`) + a printk sysctl the initramfs can't override; ~12 s to userspace | ✅ |
 | 10 | **Volume-Up key** — remapped to `pm8150l_gpios` gpio3, emits `KEY_VOLUMEUP` | ✅ |
-| 11 | **Battery** — MAX77705 fuel gauge (`max17042`) telemetry **+ charging** (`max77705` MFD + charger) | ✅ normal USB-host passes; first wall boot/UI pass; standalone monitor pending |
+| 11 | **Battery** — MAX77705 fuel gauge (`max17042`) telemetry **+ charging** (`max77705` MFD + charger) | ✅ normal USB-host, wall-power and battery-only startup accepted; post-bind USB insertion/SSH passed |
 | 12 | **Wi-Fi** — QCA6390 over PCIe via `ath11k_pci` + MHI; `wlp1s0` scans and associates | ✅ |
 | 13 | **KDE Plasma Mobile** — `sddm` autologin → mobile shell on the Adreno, ~12 s cold boot (GNOME still installed as a fallback) | ✅ |
 | 14 | **CPU wedge root-caused** — the "phone dies under load" bug is `cpu7` never returning from `cpu-sleep-1-0` power collapse; that idle state is now disabled on cpus 4-7 | ✅ fix holding (first 50 min session clean; longer soak still welcome) |
@@ -278,7 +278,18 @@ in charger startup. The corrected wall-power reboot (`668d5aac…`) also
 passed hardware, battery, desktop, audio, GPU, touch, Wi-Fi, NetworkManager,
 SSH/UI and the six-minute charger monitor: 25 healthy samples, stable 500 mA
 readbacks, no charger/SE0 faults or unhandled IRQs, and charge rising
-3156000 -> 3162000 uAh. Battery-only startup remains pending.
+3156000 -> 3162000 uAh. Battery-only boot `b8346b4a…` also passed: all required services/UI
+started with no cable, canonical no-VBUS preparation performed zero UIC reads
+or mailbox writes, and 25 samples over 360 s stayed healthy at 24 C with all
+four IRQ totals zero. The firmware's input/charge settings of 500000/100000 uA
+were retained with zero limit writes. Gauge charge fell 3145000 -> 3091000 uAh,
+consistent with the sampled discharge current. First host insertion after MAX bind also passed without a reboot:
+UDC changed from not attached to configured, the laptop enumerated the gadget,
+and direct USB SSH succeeded. The two-minute source/IRQ capture stayed healthy.
+The guarded raw helper was not rerun after MAX bind. The subsequent laptop-to-wall
+transfer also passed without charger/SE0 faults; Wi-Fi SSH remained available.
+The retained 100 mA charge setting can persist after insertion, so charging
+throughput remains a separate policy decision.
 
 Mainline has no driver for the MAX77705's MUIC, so the
 source type is not supplied to the charger driver and there is no automatic
@@ -286,12 +297,13 @@ BC1.2 higher-current policy. Wall-charger firmware can nevertheless leave higher
 the first wall-power observation showed `input_current_limit=1750000` uA and
 `constant_charge_current=2100000` uA, with AICL later reporting 1225000 uA.
 The driver-owned startup helper now applies a conservative 500000-uA cap after
-the charger is healthy. It prevalidates both existing values, rejects missing,
-malformed or below-cap values, never raises a limit, and writes only values
-above the cap. The input setter writes 475000 uA because that driver's encoding
-reads back 500000 uA; the charge setter round-trips 500000 uA. If both values
-already read exactly 500000 uA, startup performs zero limit writes. The guards,
-500000-uA input/charge policy and no-higher-current assumption remain. The
+the charger is healthy. It prevalidates both inherited values in the accepted
+100000..3200000-uA range before any write. Values at or below the cap are
+retained unchanged; only values above the cap are lowered, and malformed or
+out-of-range values fail closed. The input setter writes 475000 uA because that
+driver's encoding reads back 500000 uA; the charge setter writes 500000 uA.
+Final readback must equal the retained original value or 500000 uA when lowered.
+The guards, 500000-uA input/charge cap and no-higher-current assumption remain. The
 accepted normal USB-host boots measured mean net current of about +13 mA and
 +22 mA, with charge increasing by about 5,000 uAh in each six-minute monitor.
 These are idle-desktop observations and do not establish heavy-load headroom.
@@ -309,6 +321,12 @@ and critical above 10%, with a single notification per hysteresis transition.
 Missing or invalid telemetry cannot re-arm a warning. A labeled critical-urgency test notification rendered in the actual shell;
 wall screenshots show both `USB↑ 77%` and `USB↓ 77%`. Threshold fixtures passed. Actual 10%/5% depletion and warning
 delivery at those thresholds have not been run.
+
+With no cable, the pinned driver can report charger `online=0`,
+`status=Discharging` and `health=Unspecified failure` from its offline
+`BAT_DTLS` default. Startup accepts only offline `Good` or `Unspecified failure`
+with `Discharging`; online charger health must be `Good`. Both paths still
+require a healthy, present fuel gauge with plausible telemetry.
 
 The selective normal-user Hyprland/Omarchy Quattro desktop, package manifest,
 offline runtime preparer and recovery procedure are documented in

@@ -183,7 +183,40 @@ at two handled initial events and CHGIN stays zero. The startup health
 guard passes. These idle-desktop/blanking measurements do not establish
 heavy-load charging headroom.
 
-Battery-only startup and first host insertion after MAX bind remain pending.
+Battery-only startup is accepted on boot
+`b8346b4a-547f-421c-814e-7d54c21795d1`. Hardware, battery, desktop, GPU, touch,
+Wi-Fi, NetworkManager, audio and SSH start with no cable. The source receipt
+records canonical zero BC/CC/no-VBUS deferral, zero UIC reads and zero mailbox
+writes. All 25 samples over 360 s show healthy fuel telemetry at 24 C, stable
+500000/100000-uA input/charge settings, all four IRQ counters zero and no
+charger/SE0 faults in the full 770-line kernel journal. Mean sampled current
+is -551787.24 uA and charge falls 3145000 -> 3091000 uAh. Startup performs zero
+limit writes, the automatic health guard passes, and the actual UI shows
+`BAT↓ 77%`. This establishes bounded operation without a laptop, not discharge
+endurance.
+
+First host insertion after MAX bind also passed on this same battery-started
+boot: a 25-sample/two-minute capture records online=0 -> 1 and UDC not attached
+-> configured. The laptop enumerated `1d6b:0104`, its existing USB NIC regained
+172.16.42.2, and direct pinned USB SSH succeeded without a reboot or laptop
+configuration changes. Parent/charger/CHGIN totals rose 0 -> 1 with zero
+unhandled counts; AICL remained zero and the full journal has no charger/SE0
+faults. The 500000/100000-uA settings were retained and later gauge readings
+show modest positive current. This establishes the observed insertion and
+SSH recovery, not general USB-C role/negotiation support.
+
+The subsequent laptop-to-wall transfer on that boot also passed a 25-sample/
+120-s capture: source 1 -> 0 -> 1, parent/charger/CHGIN totals 1 -> 3,
+AICL zero, healthy telemetry and no charger/SE0 faults. Wi-Fi SSH continued
+with the laptop USB device/NIC absent. UDC remained stale `configured` after
+removal, so source detection uses charger online rather than UDC state.
+Both cable captures retained 500000/100000-uA settings. Lower firmware charge
+settings can therefore persist after insertion; this work adds no automatic
+increase or throughput guarantee. The temporary startup rollback guard is now
+disabled after acceptance; original profile backups and protected manifests
+remain available. Hardware preparation, battery, desktop, Wi-Fi and gadget
+startup remain enabled.
+
 The route witness remains disabled by default; the existing raw MUIC/USB-C
 route helper must not be called after MAX bind.
 
@@ -194,13 +227,13 @@ The first wall-power observation showed `input_current_limit=1750000` uA and
 `constant_charge_current=2100000` uA, with AICL later reporting `1225000` uA.
 The driver-owned `r8q-battery` startup helper now applies a conservative
 `500000`-uA cap after bounded healthy-charger checks. It prevalidates both
-existing values, fails closed on missing, malformed, out-of-range or below-cap
-data, never raises a limit, writes only values above the cap, and verifies an
-exact `500000`-uA readback. The input setter uses a `475000`-uA write because
-that driver's encoding reads back `500000` uA; the charge setter round-trips
-`500000` uA. If both values already read exactly `500000` uA, startup performs
-zero limit writes. No automatic BC1.2 higher-current policy is added, and
-heavy-load charging headroom remains unverified.
+inherited values in the accepted `100000..3200000`-uA range before any write.
+Values at or below the cap are retained unchanged; only values above the cap
+are lowered, and malformed or out-of-range values fail closed. The input setter
+uses a `475000`-uA write because that driver's encoding reads back `500000` uA;
+the charge setter writes `500000` uA. Final readback must equal the retained
+original value or `500000` uA when lowered. No automatic BC1.2 higher-current
+policy is added, and heavy-load charging headroom remains unverified.
 
 ### Battery indicator and warnings
 
@@ -224,6 +257,12 @@ and wall screenshots show both `USB↑ 77%` and `USB↓ 77%`. Threshold fixtures
 passed. Polling runs every 30 seconds and notifications respect existing DND. Actual 10%/5%
 depletion and warning delivery at those thresholds remain untested, as does a
 discharge endurance test.
+
+With no cable, the pinned driver can report charger `online=0`,
+`status=Discharging` and `health=Unspecified failure` from its offline
+`BAT_DTLS` default. Startup accepts only offline `Good` or `Unspecified failure`
+with `Discharging`; online charger health must be `Good`. Both paths still
+require a healthy, present fuel gauge with plausible telemetry.
 
 ## Desktop acceptance status
 
@@ -270,8 +309,8 @@ The primary agent should pass each gate independently:
 4. Start the limited Quattro shell as `alarm`; verify the bar, `TERM` foot
    button, keyboard toggle and no unexpected first-party service process.
 5. Recheck both SSH routes, USB/MAX77705 route ownership and hashes after a
-   bounded UI reboot/soak. USB-host and wall-charger startup are accepted; battery-only and post-bind
-   USB edge acceptance remain separate pending gates.
+   bounded UI reboot/soak. USB-host, wall-charger and battery-only startup are accepted; post-bind
+   host insertion and direct USB SSH also passed on the battery-started boot.
 
 Display blanking has its own configuration and acceptance below. Suspend,
 power-profile, firewall, SDDM, bootloader, filesystem and Apple-specific hardware

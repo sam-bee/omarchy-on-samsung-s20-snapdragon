@@ -147,7 +147,9 @@ elif name == "insmod":
         (root / "sys/bus/i2c/devices/0-0069/driver").symlink_to(driver)
         base = root / "sys/class/power_supply/max77705-charger"
         for name, value in {
-            "health": "Good\n", "online": "1\n",
+            "health": os.environ.get("R8Q_FAKE_CHARGER_HEALTH", "Good") + "\n",
+            "online": os.environ.get("R8Q_FAKE_CHARGER_ONLINE", "1") + "\n",
+            "status": os.environ.get("R8Q_FAKE_CHARGER_STATUS", "Charging") + "\n",
             "input_current_limit": os.environ.get("R8Q_FAKE_INPUT", "500000") + "\n",
             "constant_charge_current": os.environ.get("R8Q_FAKE_CHARGE", "500000") + "\n",
         }.items():
@@ -225,6 +227,9 @@ def run_case(
     pin_state: str = "valid",
     input_current: str | None = None,
     charge_current: str | None = None,
+    charger_online: str = "1",
+    charger_health: str = "Good",
+    charger_status: str = "Charging",
 ) -> subprocess.CompletedProcess[str]:
     make_fixture(root, usb_configured=usb_configured, max_module=max_module, pin_state=pin_state)
     if wrong_machine:
@@ -243,6 +248,9 @@ def run_case(
         env["R8Q_FAKE_INPUT"] = input_current
     if charge_current is not None:
         env["R8Q_FAKE_CHARGE"] = charge_current
+    env["R8Q_FAKE_CHARGER_ONLINE"] = charger_online
+    env["R8Q_FAKE_CHARGER_HEALTH"] = charger_health
+    env["R8Q_FAKE_CHARGER_STATUS"] = charger_status
     if wrong_kernel:
         env["R8Q_FAKE_KERNEL"] = "wrong-kernel"
     if wrong_root_uuid:
@@ -336,6 +344,156 @@ def main() -> int:
             "exact 500000uA inherited limits must not trigger sysfs writes"
         )
 
+        low_root = base / "valid-low"
+        result = run_case(
+            low_root,
+            "valid-low",
+            input_current="500000",
+            charge_current="100000",
+        )
+        assert result.returncode == 0, (
+            f"valid lower inherited-current fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "input_expected_uA=500000" in result.stdout
+        assert "charge_expected_uA=100000" in result.stdout
+        assert "input_readback_uA=500000" in result.stdout
+        assert "charge_readback_uA=100000" in result.stdout
+        assert not (low_root / "sysfs-write.log").exists(), (
+            "valid lower inherited limits must not trigger sysfs writes"
+        )
+
+        both_low_root = base / "both-below-cap"
+        result = run_case(
+            both_low_root,
+            "both-below-cap",
+            input_current="400000",
+            charge_current="450000",
+        )
+        assert result.returncode == 0, (
+            f"both below-cap inherited-current fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "input_expected_uA=400000" in result.stdout
+        assert "charge_expected_uA=450000" in result.stdout
+        assert "input_readback_uA=400000" in result.stdout
+        assert "charge_readback_uA=450000" in result.stdout
+        assert not (both_low_root / "sysfs-write.log").exists(), (
+            "both valid below-cap limits must not trigger sysfs writes"
+        )
+
+        mixed_charge_root = base / "mixed-charge-high"
+        result = run_case(
+            mixed_charge_root,
+            "mixed-charge-high",
+            input_current="100000",
+            charge_current="2100000",
+        )
+        assert result.returncode == 0, (
+            f"mixed lower-input/high-charge fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "input_expected_uA=100000" in result.stdout
+        assert "charge_expected_uA=500000" in result.stdout
+        assert "input_readback_uA=100000" in result.stdout
+        assert "charge_readback_uA=500000" in result.stdout
+        assert (mixed_charge_root / "sysfs-write.log").read_text(
+            encoding="utf-8"
+        ).splitlines() == ["500000"]
+
+        mixed_input_root = base / "mixed-input-high"
+        result = run_case(
+            mixed_input_root,
+            "mixed-input-high",
+            input_current="1750000",
+            charge_current="100000",
+        )
+        assert result.returncode == 0, (
+            f"mixed high-input/lower-charge fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "input_expected_uA=500000" in result.stdout
+        assert "charge_expected_uA=100000" in result.stdout
+        assert "input_readback_uA=500000" in result.stdout
+        assert "charge_readback_uA=100000" in result.stdout
+        assert (mixed_input_root / "sysfs-write.log").read_text(
+            encoding="utf-8"
+        ).splitlines() == ["475000"]
+
+        offline_unspecified_root = base / "offline-unspecified"
+        result = run_case(
+            offline_unspecified_root,
+            "offline-unspecified",
+            charger_online="0",
+            charger_health="Unspecified failure",
+            charger_status="Discharging",
+        )
+        assert result.returncode == 0, (
+            f"offline Unspecified failure fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "charger_plausibility=health:Unspecified failure online:0 status:Discharging" in result.stdout
+
+        offline_good_root = base / "offline-good"
+        result = run_case(
+            offline_good_root,
+            "offline-good",
+            charger_online="0",
+            charger_health="Good",
+            charger_status="Discharging",
+        )
+        assert result.returncode == 0, (
+            f"offline Good fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+
+        for case, kwargs, expected in (
+            (
+                "offline-unspecified-charging",
+                {
+                    "charger_online": "0",
+                    "charger_health": "Unspecified failure",
+                    "charger_status": "Charging",
+                },
+                "offline charger status is not Discharging",
+            ),
+            (
+                "offline-dead",
+                {
+                    "charger_online": "0",
+                    "charger_health": "Dead",
+                    "charger_status": "Discharging",
+                },
+                "unexpected offline charger health",
+            ),
+            (
+                "online-unspecified",
+                {
+                    "charger_online": "1",
+                    "charger_health": "Unspecified failure",
+                    "charger_status": "Charging",
+                },
+                "charger health is not Good while online",
+            ),
+            (
+                "malformed-status",
+                {
+                    "charger_online": "0",
+                    "charger_health": "Good",
+                    "charger_status": "not-a-status",
+                },
+                "invalid charger status",
+            ),
+        ):
+            result = run_case(base / case, case, **kwargs)
+            assert result.returncode != 0, (
+                f"{case} unexpectedly passed:\n{result.stdout}\n{result.stderr}"
+            )
+            assert expected in result.stderr, f"{case}: missing {expected!r}: {result.stderr}"
+
+        for bad_health in ("Overvoltage", "Undervoltage", "No battery", "Unknown", "", "bad-health"):
+            case = "offline-bad-health-" + (bad_health.replace(" ", "-") or "empty")
+            result = run_case(base / case, case, charger_online="0", charger_health=bad_health, charger_status="Discharging")
+            assert result.returncode != 0 and "unexpected offline charger health" in result.stderr, (case, result.stdout, result.stderr)
+        for bad_status in ("Unknown", "Full", "Not charging", ""):
+            case = "offline-bad-status-" + (bad_status.replace(" ", "-") or "empty")
+            result = run_case(base / case, case, charger_online="0", charger_health="Good", charger_status=bad_status)
+            assert result.returncode != 0, (case, result.stdout, result.stderr)
+
         wall_root = base / "wall-inherited"
         result = run_case(
             wall_root,
@@ -370,14 +528,14 @@ def main() -> int:
                 "input_current_limit_uA is not an unsigned integer",
             ),
             (
-                "below-cap",
-                {"input_current": "400000", "charge_current": "2100000"},
-                "below conservative cap",
+                "below-min-input",
+                {"input_current": "99999", "charge_current": "2100000"},
+                "input_current_limit_uA out of range",
             ),
             (
-                "charge-below-cap",
-                {"input_current": "1750000", "charge_current": "400000"},
-                "constant_charge_current_uA is below conservative cap",
+                "below-min-charge",
+                {"input_current": "1750000", "charge_current": "99999"},
+                "constant_charge_current_uA out of range",
             ),
             (
                 "out-of-range-current",
@@ -401,7 +559,7 @@ def main() -> int:
                 f"{case} unexpectedly passed:\n{result.stdout}\n{result.stderr}"
             )
             assert expected in result.stderr, f"{case}: missing {expected!r}: {result.stderr}"
-            if case in {"malformed-current", "below-cap", "charge-below-cap", "out-of-range-current"}:
+            if case in {"malformed-current", "below-min-input", "below-min-charge", "out-of-range-current"}:
                 assert not (failure_root / "sysfs-write.log").exists(), (
                     f"{case} wrote before validating both inherited values"
                 )

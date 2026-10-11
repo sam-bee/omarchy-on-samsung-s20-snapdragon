@@ -84,8 +84,8 @@ current is +13162 / +21712 uA. Gauge charge rises by 5000 uAh in each run.
 This establishes modest net charging in the tested desktop profile, not
 headroom for arbitrary workloads. Battery autoload is now enabled. The
 IRQ-less gauge and unused generic MFD child warnings remain recorded as
-known limitations, separately from charger faults. Standalone startup,
-cable edges, suspend and USB-C negotiation are separate acceptance gates.
+known limitations, separately from charger faults. Post-bind cable edges,
+suspend and USB-C negotiation remain separate acceptance gates.
 
 The corrected wall-power startup also passes a 25-sample, 359.98-second
 capture on boot `668d5aac…`: stable 500000-uA readbacks, zero unhandled
@@ -95,8 +95,27 @@ events; CHGIN remains zero. A laptop-to-wall cable transition earlier recorded
 two handled CHGIN events without faults. Wall firmware inherited higher
 current settings, so the standalone helper now lowers them through the bound
 charger driver to the reviewed 500 mA cap; see the desktop document for its
-pinned input-encoding compatibility. Battery-only and post-bind host insertion
-are still separate physical gates.
+pinned input-encoding compatibility.
+
+Battery-only boot `b8346b4a…` also passes 25 samples over 360 s with no cable,
+healthy fuel telemetry at 24 C, all four IRQ totals zero, no unhandled counts
+or charger/SE0 faults in the full 770-line journal, and all desktop/hardware/
+network/audio services active. The no-VBUS source receipt records zero UIC
+reads and mailbox writes. Firmware settings 500000/100000 uA remain unchanged
+with zero limit writes; sampled current is negative and charge falls
+3145000 -> 3091000 uAh. This is bounded standalone startup/operation, not
+endurance or charging after insertion.
+
+A later post-bind host insertion on the same battery boot passed: the
+25-sample/two-minute capture includes source offline -> online and UDC not
+attached -> configured, direct USB SSH succeeded, and parent/charger/CHGIN
+counters rose 0 -> 1 with no unhandled interrupts or charger/SE0 journal
+faults. AICL stayed zero. This exercises a real handled cable event; no raw
+route helper restart or driver rebind was used. General role/negotiation
+support and repeated cable cycling remain separate work. A subsequent
+laptop-to-wall transfer records two more handled parent/charger/CHGIN events
+(1 -> 3), source 1 -> 0 -> 1, stable 500000/100000-uA settings and no unhandled
+counts or charger/SE0 faults in its two-minute capture.
 
 Raw investigation and acceptance evidence is retained under ignored
 `out/max77705-investigation-20261010/` and
