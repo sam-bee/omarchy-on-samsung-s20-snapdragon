@@ -4,6 +4,7 @@
 # the per-boot route transaction and its persistent receipt.
 set -eu
 umask 077
+REQUESTED_OPTIONAL_NOHOST=${R8Q_USB_ROUTE_OPTIONAL_NOHOST:-0}
 
 ENV_FILE=/etc/r8q-usb-route.env
 SYSFS_ROOT=/sys
@@ -72,6 +73,16 @@ test ! -L "$ENV_FILE" || die "environment file is a symlink"
 # The image-owned file is the only source of deployment identity and hashes.
 # shellcheck disable=SC1090
 . "$ENV_FILE"
+
+# Only r8q-hardware-prepare.service sets this explicit optional mode.  The
+# legacy cable-attached unit leaves it at zero and therefore retains the
+# original host-only route behavior.  Validate after loading the image-owned
+# identity file so that the file cannot silently change the service's mode.
+OPTIONAL_NOHOST=$REQUESTED_OPTIONAL_NOHOST
+case "$OPTIONAL_NOHOST" in
+    0|1) ;;
+    *) echo "r8q-usb-route: ERROR: optional no-host mode must be 0 or 1" >&2; exit 1 ;;
+esac
 
 : "${EXPECTED_KERNEL:?missing EXPECTED_KERNEL}"
 : "${EXPECTED_MACHINE_ID:?missing EXPECTED_MACHINE_ID}"
@@ -269,13 +280,14 @@ test ! -L "$BOOT_DIR" || die "wrapper receipt is a symlink"
 mkdir "$BOOT_DIR" || die "cannot create wrapper receipt"
 PHASE=helper
 trap 'die interrupted' HUP INT TERM
-printf 'schema=r8q-usb-route-wrapper/v1\nboot_id=%s\nkernel=%s\nmachine_id=%s\nroot_uuid=%s\nboot_sha256=%s\nhelper_path=%s\nhelper_sha256=%s\nprotocol_sha256=%s\ngpi_sha256=%s\ngeni_sha256=%s\nmodules_after=%s\n' \
-    "$BOOT_ID" "$KERNEL" "$MACHINE_ID" "$ROOT_UUID" "$BOOT_ACTUAL" "$HELPER_PATH" "$EXPECTED_HELPER_SHA256" "$EXPECTED_PROTOCOL_SHA256" "$EXPECTED_GPI_SHA256" "$EXPECTED_GENI_SHA256" "$(printf '%s' "$module_list" | tr '\n' ';')" > "$BOOT_DIR/metadata.txt"
+printf 'schema=r8q-usb-route-wrapper/v1\nboot_id=%s\nkernel=%s\nmachine_id=%s\nroot_uuid=%s\nboot_sha256=%s\nhelper_path=%s\nhelper_sha256=%s\nprotocol_sha256=%s\ngpi_sha256=%s\ngeni_sha256=%s\nmodules_after=%s\noptional_nohost_mode=%s\n' \
+    "$BOOT_ID" "$KERNEL" "$MACHINE_ID" "$ROOT_UUID" "$BOOT_ACTUAL" "$HELPER_PATH" "$EXPECTED_HELPER_SHA256" "$EXPECTED_PROTOCOL_SHA256" "$EXPECTED_GPI_SHA256" "$EXPECTED_GENI_SHA256" "$(printf '%s' "$module_list" | tr '\n' ';')" "$OPTIONAL_NOHOST" > "$BOOT_DIR/metadata.txt"
 HELPER_RC=0
-R8Q_HARDWARE_MODE=1 R8Q_USB_ROUTE_HARDWARE_MODE=1 "$HELPER_PATH" > "$BOOT_DIR/helper.stdout" 2> "$BOOT_DIR/helper.stderr" || HELPER_RC=$?
+R8Q_HARDWARE_MODE=1 R8Q_USB_ROUTE_HARDWARE_MODE=1 R8Q_USB_ROUTE_OPTIONAL_NOHOST="$OPTIONAL_NOHOST" \
+    "$HELPER_PATH" > "$BOOT_DIR/helper.stdout" 2> "$BOOT_DIR/helper.stderr" || HELPER_RC=$?
 printf 'helper_return_code=%s\n' "$HELPER_RC" >> "$BOOT_DIR/metadata.txt"
 if test "$HELPER_RC" != 0; then
     die "route helper failed rc=$HELPER_RC"
 fi
-printf 'outcome=pass\nautomatic_retry=false\n' >> "$BOOT_DIR/metadata.txt"
+printf 'startup_gate=pass\noutcome=pass\nautomatic_retry=false\n' >> "$BOOT_DIR/metadata.txt"
 printf 'r8q-usb-route: helper completed boot=%s receipt=%s\n' "$BOOT_ID" "$BOOT_DIR"

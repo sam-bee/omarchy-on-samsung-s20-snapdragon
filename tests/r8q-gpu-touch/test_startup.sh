@@ -9,6 +9,7 @@ TOUCH_SERVICE=$ROOT/rootfs/etc/systemd/system/r8q-touch.service
 TOUCH_CONF=$ROOT/rootfs/etc/modprobe.d/r8q-touch-blacklist.conf
 HELPER=$ROOT/rootfs/usr/local/sbin/r8q-touch-up.sh
 ROUTE=$ROOT/rootfs/etc/systemd/system/r8q-usb-route.service
+PREP=$ROOT/rootfs/etc/systemd/system/r8q-hardware-prepare.service
 GADGET=$ROOT/rootfs/etc/systemd/system/r8q-usb-gadget.service
 
 contains() { grep -F "$2" "$1" >/dev/null; }
@@ -16,9 +17,9 @@ not_contains() { ! grep -F "$2" "$1" >/dev/null; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 sh -n "$HELPER"
-contains "$GPU_SERVICE" 'Requires=r8q-usb-route.service'
-contains "$GPU_SERVICE" 'After=r8q-usb-route.service'
-contains "$GPU_SERVICE" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service'
+contains "$GPU_SERVICE" 'Requires=r8q-hardware-prepare.service'
+contains "$GPU_SERVICE" 'After=r8q-hardware-prepare.service'
+contains "$GPU_SERVICE" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service'
 contains "$GPU_SERVICE" 'ExecStart=/usr/bin/modprobe msm separate_gpu_kms=1 r8q_zap_dyn=1 r8q_zap_secvid=0'
 not_contains "$GPU_SERVICE" 'After=multi-user.target'
 contains "$GPU_SERVICE" '[Install]'
@@ -26,9 +27,9 @@ contains "$GPU_SERVICE" 'WantedBy=multi-user.target'
 not_contains "$GPU_SERVICE" 'rmmod'
 not_contains "$GPU_SERVICE" 'modprobe -r'
 
-contains "$TOUCH_SERVICE" 'Requires=r8q-usb-route.service'
-contains "$TOUCH_SERVICE" 'After=r8q-usb-route.service'
-contains "$TOUCH_SERVICE" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service'
+contains "$TOUCH_SERVICE" 'Requires=r8q-hardware-prepare.service'
+contains "$TOUCH_SERVICE" 'After=r8q-hardware-prepare.service'
+contains "$TOUCH_SERVICE" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service'
 contains "$TOUCH_SERVICE" 'ExecStart=/usr/local/sbin/r8q-touch-up.sh'
 not_contains "$TOUCH_SERVICE" '/root/ts'
 not_contains "$TOUCH_SERVICE" 'ExecStart=/usr/bin/insmod'
@@ -57,10 +58,18 @@ for module in \
     fi
 done
 
-# Static graph checks: route -> gadget -> network-pre, with GPU/touch waiting
-# on route and neither optional unit pointing back to multi-user.
+# Static graph checks: hardware prep -> gadget -> network-pre, with GPU/touch
+# waiting on hardware prep and neither optional unit pointing back to multi-user.
 contains "$GADGET" 'Before=network-pre.target'
-contains "$ROUTE" 'After=r8q-usb-gadget.service'
+contains "$GADGET" 'Requires=r8q-hardware-prepare.service'
+contains "$GADGET" 'After=r8q-hardware-prepare.service'
+contains "$GADGET" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service'
+contains "$ROUTE" 'ExecStart=/usr/local/sbin/r8q-usb-route-witness.sh'
+not_contains "$ROUTE" 'Wants=r8q-usb-gadget.service'
+not_contains "$ROUTE" 'After=r8q-usb-gadget.service'
+contains "$ROUTE" 'Requires=r8q-hardware-prepare.service'
+contains "$ROUTE" 'After=r8q-hardware-prepare.service'
+contains "$PREP" 'Before=network-pre.target'
 not_contains "$GPU_SERVICE" 'After=multi-user.target'
 not_contains "$TOUCH_SERVICE" 'After=multi-user.target'
 

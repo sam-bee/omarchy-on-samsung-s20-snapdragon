@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "r8q.battery",
+  "name": "R8Q battery",
+  "version": "0.1.0",
+  "author": "r8q-arch",
+  "description": "Local battery indicator and passive low-charge notifications",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "R8Q battery",
+    "description": "Displays direct fuel-gauge and charger telemetry",
+    "category": "Phone",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

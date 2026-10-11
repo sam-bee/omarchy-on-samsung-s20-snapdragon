@@ -1,11 +1,14 @@
 [Unit]
 Description=r8q USB NCM gadget (ssh over USB)
 Wants=network-pre.target
+Requires=r8q-hardware-prepare.service
+After=r8q-hardware-prepare.service
 Before=network-pre.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
 ExecStart=/usr/local/sbin/r8q-usb-gadget-up.sh
 
 [Install]

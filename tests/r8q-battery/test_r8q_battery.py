@@ -34,7 +34,7 @@ def write(path: Path, value: str) -> None:
     path.write_text(value, encoding="utf-8")
 
 
-def make_fixture(root: Path, *, usb_configured: bool = True, max_module: bool = False) -> None:
+def make_fixture(root: Path, *, usb_configured: bool = True, max_module: bool = False, pin_state: str = "valid") -> None:
     sysfs = root / "sys"
     proc = root / "proc"
     etc = root / "etc"
@@ -55,6 +55,14 @@ def make_fixture(root: Path, *, usb_configured: bool = True, max_module: bool = 
     if usb_configured:
         write(sysfs / "class/udc/fixture-udc/state", "configured\n")
         write(sysfs / "class/net/usb0/operstate", "up\n")
+
+    pin_state_dir = sysfs / "firmware/devicetree/base/soc/pmic/gpio@c000/max77705-int-default-state"
+    write(pin_state_dir / "pins", ("gpio10" if pin_state == "wrong-pin" else "gpio11") + "\0")
+    if pin_state != "missing-pull-up":
+        write(pin_state_dir / "bias-pull-up", "")
+    if pin_state == "bias-disable":
+        write(pin_state_dir / "bias-disable", "")
+    write(pin_state_dir / "power-source", "\0\0\0\1" if pin_state != "bad-power-source" else "\0\0\0\0")
 
     modules = "i2c_core 32768 0 - Live 0x0\n"
     if max_module:
@@ -91,7 +99,7 @@ elif name == "sleep":
     pass
 elif name == "systemctl":
     joined = " ".join(args)
-    if "r8q-usb-route.service" in joined and case == "routeinactive" and "ActiveState" in joined:
+    if "r8q-hardware-prepare.service" in joined and case == "routeinactive" and "ActiveState" in joined:
         print("inactive")
     elif "ActiveState" in joined:
         print("active")
@@ -140,9 +148,11 @@ elif name == "insmod":
         base = root / "sys/class/power_supply/max77705-charger"
         for name, value in {
             "health": "Good\n", "online": "1\n",
-            "input_current_limit": "500000\n",
-            "constant_charge_current": "500000\n",
+            "input_current_limit": os.environ.get("R8Q_FAKE_INPUT", "500000") + "\n",
+            "constant_charge_current": os.environ.get("R8Q_FAKE_CHARGE", "500000") + "\n",
         }.items():
+            if case == "missing-current" and name == "input_current_limit":
+                continue
             write_path = base / name
             write_path.parent.mkdir(parents=True, exist_ok=True)
             write_path.write_text(value)
@@ -167,6 +177,36 @@ def materialize_helper(root: Path) -> Path:
         "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
         f"PATH={root / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin",
     )
+    # The real MAX77705 driver translates a CHGIN write of 475000uA to a
+    # 500000uA readback (its getter adds one 25mA step).  Keep that exact
+    # driver behavior in the offline fixture without weakening production
+    # helper semantics or adding a production test hook.
+    old_writer = '''write_sysfs_value() {
+    value=$1
+    path=$2
+    printf '%s\\n' "$value" > "$path" || return 1
+}'''
+    new_writer = f'''write_sysfs_value() {{
+    value=$1
+    path=$2
+    if [ "$R8Q_CASE" = writefail ]; then
+        return 1
+    fi
+    printf '%s\\n' "$value" >> "{root / 'sysfs-write.log'}" || return 1
+    printf '%s\\n' "$value" > "$path" || return 1
+    case "$path:$value" in
+        *input_current_limit:*)
+            if [ "$R8Q_CASE" = readbackfail ]; then
+                printf '525000\\n' > "$path"
+            else
+                printf '%s\\n' "$(( (value / 25000 + 1) * 25000 ))" > "$path"
+            fi
+            ;;
+    esac
+}}'''
+    if old_writer not in text:
+        raise AssertionError("battery writer function missing from candidate helper")
+    text = text.replace(old_writer, new_writer)
     helper = root / "helper.sh"
     write(helper, text)
     helper.chmod(0o755)
@@ -182,8 +222,11 @@ def run_case(
     wrong_machine: bool = False,
     wrong_root_uuid: bool = False,
     wrong_kernel: bool = False,
+    pin_state: str = "valid",
+    input_current: str | None = None,
+    charge_current: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    make_fixture(root, usb_configured=usb_configured, max_module=max_module)
+    make_fixture(root, usb_configured=usb_configured, max_module=max_module, pin_state=pin_state)
     if wrong_machine:
         write(root / "etc/machine-id", "wrong-machine-id\n")
     helper = materialize_helper(root)
@@ -196,6 +239,10 @@ def run_case(
             "PATH": f"{root / 'bin'}:{env['PATH']}",
         }
     )
+    if input_current is not None:
+        env["R8Q_FAKE_INPUT"] = input_current
+    if charge_current is not None:
+        env["R8Q_FAKE_CHARGE"] = charge_current
     if wrong_kernel:
         env["R8Q_FAKE_KERNEL"] = "wrong-kernel"
     if wrong_root_uuid:
@@ -216,8 +263,8 @@ def assert_rejected(root: Path, name: str, expected: str, **kwargs: object) -> N
 
 def main() -> int:
     service = SERVICE.read_text(encoding="utf-8")
-    assert "Requires=r8q-usb-gadget.service r8q-usb-route.service r8q-touch.service" in service
-    assert "After=r8q-usb-gadget.service r8q-usb-route.service r8q-touch.service" in service
+    assert "Requires=r8q-hardware-prepare.service r8q-touch.service" in service
+    assert "After=r8q-hardware-prepare.service r8q-touch.service" in service
     assert "ExecStart=/usr/local/sbin/r8q-battery-up.sh" in service
     assert "ExecStartPost" not in service
     assert "700000" not in service and "1000000" not in service
@@ -237,11 +284,29 @@ def main() -> int:
         )
         assert_rejected(
             base / "route-inactive", "routeinactive",
-            "r8q-usb-route.service is not active",
+            "r8q-hardware-prepare.service is not active",
+        )
+        standalone_root = base / "standalone-no-udc"
+        result = run_case(standalone_root, "standalone-no-udc", usb_configured=False)
+        assert result.returncode == 0, f"standalone no-UDC fixture failed: {result.stderr}"
+        assert (standalone_root / "insmod.log").read_text(encoding="utf-8").splitlines() == [
+            "max17042_battery.ko", "max77705.ko", "max77705_charger.ko",
+        ]
+        assert_rejected(
+            base / "wrong-pin-state", "wrongpin", "IRQ pin is not gpio11",
+            pin_state="wrong-pin",
         )
         assert_rejected(
-            base / "usb-timeout", "usbtimeout",
-            "did not become configured", usb_configured=False,
+            base / "missing-pull-up", "missingpull", "lacks bias-pull-up",
+            pin_state="missing-pull-up",
+        )
+        assert_rejected(
+            base / "bias-disabled", "biasdisable", "has bias-disable",
+            pin_state="bias-disable",
+        )
+        assert_rejected(
+            base / "bad-power-source", "badpower", "power-source is not big-endian 1",
+            pin_state="bad-power-source",
         )
         assert_rejected(
             base / "max-module", "maxmodule",
@@ -267,8 +332,91 @@ def main() -> int:
         assert "fuel_stage=pass" in result.stdout
         assert "mfd_stage=pass" in result.stdout
         assert "charger_stage=pass" in result.stdout
+        assert not (success_root / "sysfs-write.log").exists(), (
+            "exact 500000uA inherited limits must not trigger sysfs writes"
+        )
 
-    print("PASS: battery identity, route, USB, module-conflict, hash, and ordered-load fixtures")
+        wall_root = base / "wall-inherited"
+        result = run_case(
+            wall_root,
+            "wall-inherited",
+            input_current="1750000",
+            charge_current="2100000",
+        )
+        assert result.returncode == 0, (
+            f"wall inherited-current fixture failed:\n{result.stdout}\n{result.stderr}"
+        )
+        assert "current_limit_policy=conservative_cap" in result.stdout
+        assert "input_inherited_uA=1750000" in result.stdout
+        assert "charge_inherited_uA=2100000" in result.stdout
+        assert "input_write_uA=475000" in result.stdout
+        assert "charge_write_uA=500000" in result.stdout
+        assert "input_readback_uA=500000" in result.stdout
+        assert "charge_readback_uA=500000" in result.stdout
+        assert (wall_root / "sysfs-write.log").read_text(encoding="utf-8").splitlines() == [
+            "475000",
+            "500000",
+        ]
+
+        for case, kwargs, expected in (
+            (
+                "malformed-current",
+                {"input_current": "not-a-number", "charge_current": "2100000"},
+                "input_current_limit_uA is not an unsigned integer",
+            ),
+            (
+                "missing-current",
+                {"input_current": "1750000", "charge_current": "2100000"},
+                "input_current_limit_uA is not an unsigned integer",
+            ),
+            (
+                "below-cap",
+                {"input_current": "400000", "charge_current": "2100000"},
+                "below conservative cap",
+            ),
+            (
+                "charge-below-cap",
+                {"input_current": "1750000", "charge_current": "400000"},
+                "constant_charge_current_uA is below conservative cap",
+            ),
+            (
+                "out-of-range-current",
+                {"input_current": "5000000", "charge_current": "2100000"},
+                "out of range",
+            ),
+            (
+                "writefail",
+                {"input_current": "1750000", "charge_current": "2100000"},
+                "failed to write input_current_limit_uA",
+            ),
+            (
+                "readbackfail",
+                {"input_current": "1750000", "charge_current": "2100000"},
+                "input_current_limit_uA readback is not 500000",
+            ),
+        ):
+            failure_root = base / case
+            result = run_case(failure_root, case, **kwargs)
+            assert result.returncode != 0, (
+                f"{case} unexpectedly passed:\n{result.stdout}\n{result.stderr}"
+            )
+            assert expected in result.stderr, f"{case}: missing {expected!r}: {result.stderr}"
+            if case in {"malformed-current", "below-cap", "charge-below-cap", "out-of-range-current"}:
+                assert not (failure_root / "sysfs-write.log").exists(), (
+                    f"{case} wrote before validating both inherited values"
+                )
+            if case == "missing-current":
+                assert not (failure_root / "sysfs-write.log").exists(), (
+                    "missing property wrote before validation"
+                )
+            if case == "readbackfail":
+                assert (failure_root / "sysfs-write.log").read_text(
+                    encoding="utf-8"
+                ).splitlines() == ["475000"], (
+                    "readback failure must stop before the charge-current write"
+                )
+
+    print("PASS: battery identity, prep/DT, no-UDC, ordered-load, conservative-cap, and failure fixtures")
     return 0
 
 

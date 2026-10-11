@@ -69,6 +69,7 @@ RUNTIME_OVERLAY_FILES = {
 }
 RUNTIME_OVERLAY_PREFIXES = {
     'plugin/r8q.launcher': 'phone-plugin/r8q.launcher',
+    'plugin/r8q.battery': 'phone-plugin/r8q.battery',
 }
 ABSOLUTE_SYMLINKS = {
     'usr/bin/omarchy-launch-shell': '/usr/share/omarchy/bin/omarchy-launch-shell',

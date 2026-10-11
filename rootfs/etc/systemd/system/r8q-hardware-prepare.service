@@ -1,0 +1,23 @@
+[Unit]
+Description=r8q early GPI/GENI hardware preparation and optional USB route gate
+Documentation=man:systemd.service(5)
+ConditionPathExists=/etc/r8q-usb-route.env
+After=local-fs.target
+Before=network-pre.target r8q-usb-gadget.service r8q-gpu.service r8q-touch.service r8q-wifi.service r8q-battery.service r8q-audio-start.service NetworkManager.service r8q-desktop.service
+
+[Service]
+Type=oneshot
+# This is an explicit standalone profile mode. The wrapper still performs
+# identity, module/hash, adapter, MAX ownership, PMIC-ID, and source-bound
+# safety checks. A no-host or DCP wall result is a successful startup gate
+# with no UIC/mailbox access; a real SDP laptop source runs the old exact
+# route transaction unchanged.
+Environment=R8Q_USB_ROUTE_OPTIONAL_NOHOST=1
+ExecStart=/usr/local/sbin/r8q-usb-route-up.sh
+RemainAfterExit=yes
+TimeoutStartSec=45s
+Restart=no
+SyslogIdentifier=r8q-hardware-prepare
+
+[Install]
+WantedBy=network-pre.target

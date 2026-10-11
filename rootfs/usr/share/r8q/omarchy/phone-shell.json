@@ -19,6 +19,9 @@
           "id": "omarchy.audio"
         },
         {
+          "id": "r8q.battery"
+        },
+        {
           "id": "omarchy.clock",
           "format": "HH:mm",
           "formatAlt": "d MMMM yyyy"
@@ -26,14 +29,17 @@
       ]
     }
   },
-  "plugins": [],
+  "plugins": [
+    {
+      "id": "r8q.battery"
+    }
+  ],
   "disabledPlugins": [
     "omarchy.emojis",
     "omarchy.image-picker",
     "omarchy.clipboard",
     "omarchy.reminders",
     "omarchy.menu",
-    "omarchy.notifications",
     "omarchy.bluetooth",
     "omarchy.monitor",
     "omarchy.network",

@@ -7,9 +7,18 @@ hash commands, so it never reads host sysfs, loads a host module, or contacts a
 phone.
 
 The fixtures require failure before `insmod` for wrong kernel/identity, an
-inactive route, a USB configuration timeout, a pre-existing MAX module, and a
-module hash mismatch. A success fixture records and checks the required
-fuel-gauge → MFD → charger order plus telemetry/default-current checks.
+inactive hardware preparation, invalid live IRQ pin configuration, a
+pre-existing MAX module, and a module hash mismatch. No configured UDC is
+required. Success fixtures check fuel-gauge → MFD → charger load order,
+telemetry, and conservative 500000-uA current readbacks.
+
+Wall-source fixtures cover inherited limits of 1750000/2100000 uA and the
+pinned charger's input encoding: a 475000-uA write reads back 500000 uA.
+Both inherited values must validate before either write; input is lowered
+first. Exact-cap fixtures perform no writes. Missing, malformed, below-cap,
+out-of-range, write-failure and readback-failure fixtures remain fail-closed.
+The fixture models the input setter/getter arithmetic and uses temporary
+ordinary files; production writes only the bound charger's sysfs properties.
 
 Run from `r8q-arch/`:
 

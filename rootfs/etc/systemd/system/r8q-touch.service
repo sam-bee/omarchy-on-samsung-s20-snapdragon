@@ -1,10 +1,10 @@
 [Unit]
 Description=r8q touchscreen (geni i2c + FTS5CU56A / Zinitix ZT7650) module load
-# The USB route wrapper owns GPI/GENI and has to complete before either touch
-# driver can request an I2C device. The helper verifies that ownership instead
-# of reloading the pinned adapter modules.
-Requires=r8q-usb-route.service
-After=r8q-usb-route.service
+# The hardware-prepare wrapper owns GPI/GENI and has to complete before either
+# touch driver can request an I2C device. The helper verifies that ownership
+# instead of reloading the pinned adapter modules.
+Requires=r8q-hardware-prepare.service
+After=r8q-hardware-prepare.service
 # The helper checks both driver binding and its registered input event node.
 # Conditions here would incorrectly skip that check for a partially bound
 # driver, so readiness is deliberately owned by the helper.
@@ -12,7 +12,7 @@ After=r8q-usb-route.service
 [Service]
 Type=oneshot
 TimeoutStartSec=30
-ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
 ExecStart=/usr/local/sbin/r8q-touch-up.sh
 RemainAfterExit=yes
 

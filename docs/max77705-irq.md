@@ -62,14 +62,43 @@ Mean net battery current was +32112 uA, with 23 positive and two negative
 samples; charge rose from 2932000 to 2935000 uAh. This idle desktop profile
 made a small net gain and does not establish headroom for arbitrary workloads.
 
-The source DTB compiles; its compiled tree changes exactly the two intended
-properties relative to the reproduced production RTC2 DTB. Charger autoload
-stays disabled on the existing persistent RTC2 image until a corrected DTB is
-deployed and repeat cable-attached startup tests pass. The current phone has
-the temporary pin correction and manually started battery service; ordinary
-reboot clears the trial. Battery-only boot, suspend and USB-C negotiation
-remain untested by this diagnostic.
+## Persistent correction and automatic startup acceptance
 
-Local raw evidence and source reviews are retained under ignored
-`out/max77705-investigation-20261010/`; the project log records the operational
-handoff and payload hashes.
+The source correction was included in the persistent audio DTB deployed on
+2026-10-10, SHA-256
+`d3a065499c4edff7b430a0fc2bea5f17428ba608bc19d9aed1a02bb1d4f1e0ca`.
+It is no longer a temporary property overlay. The kernel EFI payload remains
+`50631087ad9b22b8f009b98e9279c1c65d27e4f26c456fe6ce10f29854aaa2bf`.
+
+On 2026-10-11 the corrected persistent configuration passed a guarded manual
+bind and two fresh automatic battery-startup boots, `83cb3e73…` and
+`822d6a6d…`. Each automatic monitor contains 25 samples over 359.99 seconds.
+Parent, charger, CHGIN and AICL IRQ totals remain zero, with zero unhandled
+counters and no IRQ disable or MAX/SE0 fault in either full boot journal.
+No cable edge was required during these startup trials; a quiet interrupt
+line is therefore expected. GPIO11 stays high with VIN 1 and the pull-up.
+Desktop, touch, audio, Wi-Fi SSH and USB SSH passed after both starts.
+
+Both limits remain 500000 uA, temperature remains 24 C, and mean sampled net
+current is +13162 / +21712 uA. Gauge charge rises by 5000 uAh in each run.
+This establishes modest net charging in the tested desktop profile, not
+headroom for arbitrary workloads. Battery autoload is now enabled. The
+IRQ-less gauge and unused generic MFD child warnings remain recorded as
+known limitations, separately from charger faults. Standalone startup,
+cable edges, suspend and USB-C negotiation are separate acceptance gates.
+
+The corrected wall-power startup also passes a 25-sample, 359.98-second
+capture on boot `668d5aac…`: stable 500000-uA readbacks, zero unhandled
+interrupts, no MAX/SE0 faults in the full 770-line boot journal, and charge
+3156000 -> 3162000 uAh. Parent/charger/AICL each remain at two handled startup
+events; CHGIN remains zero. A laptop-to-wall cable transition earlier recorded
+two handled CHGIN events without faults. Wall firmware inherited higher
+current settings, so the standalone helper now lowers them through the bound
+charger driver to the reviewed 500 mA cap; see the desktop document for its
+pinned input-encoding compatibility. Battery-only and post-bind host insertion
+are still separate physical gates.
+
+Raw investigation and acceptance evidence is retained under ignored
+`out/max77705-investigation-20261010/` and
+`out/charger-standalone-20261011/`; the project log records the operational
+handoff, independent analyses and payload hashes.

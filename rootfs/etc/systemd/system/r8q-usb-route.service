@@ -1,13 +1,14 @@
 [Unit]
-Description=r8q CONTROL1 USB route recovery
-Wants=r8q-usb-gadget.service
-After=r8q-usb-gadget.service
+Description=r8q current-boot USB route receipt witness
+Requires=r8q-hardware-prepare.service
+After=r8q-hardware-prepare.service
 DefaultDependencies=yes
 ConditionPathExists=/etc/r8q-usb-route.env
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/r8q-usb-route-up.sh
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
+ExecStart=/usr/local/sbin/r8q-usb-route-witness.sh
 RemainAfterExit=yes
 TimeoutStartSec=45s
 Restart=no

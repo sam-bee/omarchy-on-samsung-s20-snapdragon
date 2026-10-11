@@ -1,13 +1,16 @@
 [Unit]
 Description=Private Samsung r8q exact-release audio bring-up (v10 amp + v8 Q6AFE; validated hardware)
 ConditionPathExists=/proc/device-tree/compatible
-After=local-fs.target
+Requires=r8q-hardware-prepare.service
+Wants=r8q-battery.service
+After=local-fs.target r8q-hardware-prepare.service r8q-battery.service
 Before=sound.target
 
 [Service]
 TimeoutStartSec=120
 Type=oneshot
 RemainAfterExit=yes
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
 ExecStart=/opt/r8q-audio/7.1.2-r8q-rtc2/load-r8q-audio.sh
 ExecStartPost=/opt/r8q-audio/7.1.2-r8q-rtc2/init-r8q-audio.sh
 

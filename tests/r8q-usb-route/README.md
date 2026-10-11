@@ -34,9 +34,19 @@ source protocol is fixed at
 guards pass. The helper stores one attempt and its raw transaction receipt per
 boot under `/var/lib/r8q-usb-route/<boot-id>/`; there is no global once marker.
 
+The standalone preparation unit sets `R8Q_USB_ROUTE_OPTIONAL_NOHOST=1`.
+Fixtures cover canonical unplugged/no-VBUS and wall-DCP deferrals, requiring
+zero UIC reads and zero mailbox writes; inconsistent, unsafe or unknown BC/CC
+states fail. The SDP host transaction keeps its existing source-bound guards.
+`test_witness.sh` feeds real helper-generated append-only receipts to the
+read-only legacy witness and rejects deferred, missing and malformed receipts.
+
 Run offline checks from the repository root:
 
 ```sh
 /bin/sh -n rootfs/usr/local/sbin/r8q-usb-route-ensure.sh
 python3 -B tests/r8q-usb-route/test_r8q_usb_route.py
+sh tests/r8q-usb-route/test_startup.sh
+sh tests/r8q-usb-route/test_witness.sh
+python3 -B tests/test_standalone_units.py
 ```

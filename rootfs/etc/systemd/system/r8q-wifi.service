@@ -1,9 +1,9 @@
 [Unit]
 Description=r8q WiFi: QCA6390 over PCIe (ath11k + MHI) module load
 # The WiFi modules DO live in /lib/modules, so udev would coldplug them at ~9 s
-# -- which races the deliberate geni bring-up used by the USB route service.
-# r8q-wifi-blacklist.conf stops that; this service deliberately loads the stack
-# only after the proven USB route has completed.
+# -- which races the deliberate GPI/GENI bring-up used by the hardware-prepare
+# service. r8q-wifi-blacklist.conf stops that; this service deliberately loads
+# the stack only after adapter/startup preparation has completed.
 #
 # Order matters:
 #  - phy-qcom-qmp-pcie is a MODULE. Until it loads, 1c00000.pcie sits silently
@@ -15,13 +15,13 @@ Description=r8q WiFi: QCA6390 over PCIe (ath11k + MHI) module load
 #    mission mode. Without it nothing binds to IPCR, QMI never starts, and
 #    ath11k waits forever at "Wait for device to enter SBL or Mission mode"
 #    with no error -- which looks exactly like a firmware boot failure.
-Requires=r8q-usb-route.service
-After=r8q-usb-route.service
+Requires=r8q-hardware-prepare.service
+After=r8q-hardware-prepare.service
 
 [Service]
 Type=oneshot
 TimeoutStartSec=120
-ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
 # Register the modular Crypto API hash before cfg80211 verifies regulatory.db.
 ExecStartPre=/usr/bin/modprobe sha256
 ExecStart=/usr/bin/modprobe phy-qcom-qmp-pcie

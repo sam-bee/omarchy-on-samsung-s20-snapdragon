@@ -8,6 +8,7 @@ NM_DROPIN=$ROOT/rootfs/etc/systemd/system/NetworkManager.service.d/10-r8q-usb-ro
 NMCONF=$ROOT/rootfs/etc/NetworkManager/conf.d/10-r8q.conf
 HELPER=$ROOT/rootfs/usr/local/sbin/r8q-wifi-up.sh
 ROUTE=$ROOT/rootfs/etc/systemd/system/r8q-usb-route.service
+PREP=$ROOT/rootfs/etc/systemd/system/r8q-hardware-prepare.service
 GADGET=$ROOT/rootfs/etc/systemd/system/r8q-usb-gadget.service
 
 contains() {
@@ -23,11 +24,11 @@ line_of() {
 }
 
 sh -n "$HELPER"
-contains "$SERVICE" 'Requires=r8q-usb-route.service'
-contains "$SERVICE" 'After=r8q-usb-route.service'
-contains "$NM_DROPIN" 'Requires=r8q-usb-route.service'
-contains "$NM_DROPIN" 'After=r8q-usb-route.service'
-contains "$NM_DROPIN" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service'
+contains "$SERVICE" 'Requires=r8q-hardware-prepare.service'
+contains "$SERVICE" 'After=r8q-hardware-prepare.service'
+contains "$NM_DROPIN" 'Requires=r8q-hardware-prepare.service'
+contains "$NM_DROPIN" 'After=r8q-hardware-prepare.service'
+contains "$NM_DROPIN" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service'
 contains "$NM_DROPIN" 'ExecStartPre=/usr/bin/modprobe sha256'
 not_contains "$SERVICE" 'r8q-battery.service'
 not_contains "$SERVICE" 'r8q-touch.service'
@@ -47,19 +48,28 @@ contains "$BLACKLIST" 'blacklist qmi_helpers'
 contains "$BLACKLIST" 'blacklist libarc4'
 contains "$BLACKLIST" 'blacklist ath'
 
-route_pre=$(line_of "$SERVICE" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service')
+prep_pre=$(line_of "$SERVICE" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service')
 sha_pre=$(line_of "$SERVICE" 'ExecStartPre=/usr/bin/modprobe sha256')
 phy_load=$(line_of "$SERVICE" 'ExecStart=/usr/bin/modprobe phy-qcom-qmp-pcie')
-test "$route_pre" -lt "$sha_pre"
+test "$prep_pre" -lt "$sha_pre"
 test "$sha_pre" -lt "$phy_load"
-nm_route_pre=$(line_of "$NM_DROPIN" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service')
+nm_prep_pre=$(line_of "$NM_DROPIN" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service')
 nm_sha_pre=$(line_of "$NM_DROPIN" 'ExecStartPre=/usr/bin/modprobe sha256')
-test "$nm_route_pre" -lt "$nm_sha_pre"
+test "$nm_prep_pre" -lt "$nm_sha_pre"
 
-# The startup graph remains one-way: gadget -> network-pre, route -> gadget,
-# and both NM and Wi-Fi wait for route. No unit may point back to NM.
+# The startup graph remains one-way: hardware prep -> gadget -> network-pre,
+# and both NM and Wi-Fi wait for hardware prep. The legacy route also requires
+# the prep unit, and no unit may point back to NM.
 contains "$GADGET" 'Before=network-pre.target'
-contains "$ROUTE" 'After=r8q-usb-gadget.service'
+contains "$GADGET" 'Requires=r8q-hardware-prepare.service'
+contains "$GADGET" 'After=r8q-hardware-prepare.service'
+contains "$GADGET" 'ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service'
+contains "$ROUTE" 'ExecStart=/usr/local/sbin/r8q-usb-route-witness.sh'
+not_contains "$ROUTE" 'Wants=r8q-usb-gadget.service'
+not_contains "$ROUTE" 'After=r8q-usb-gadget.service'
+contains "$ROUTE" 'Requires=r8q-hardware-prepare.service'
+contains "$ROUTE" 'After=r8q-hardware-prepare.service'
+contains "$PREP" 'Before=network-pre.target'
 not_contains "$ROUTE" 'After=NetworkManager.service'
 not_contains "$GADGET" 'After=NetworkManager.service'
 

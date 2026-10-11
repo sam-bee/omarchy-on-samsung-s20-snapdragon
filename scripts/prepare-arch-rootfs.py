@@ -30,6 +30,8 @@ NCM_SERVICE = REPO / 'rootfs/etc/systemd/system/r8q-usb-gadget.service'
 NCM_SCRIPT = REPO / 'rootfs/usr/local/sbin/r8q-usb-gadget-up.sh'
 GETTY_OVERLAY = REPO / 'rootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf'
 USB_ROUTE_SERVICE = REPO / 'rootfs/etc/systemd/system/r8q-usb-route.service'
+USB_ROUTE_WITNESS = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-witness.sh'
+HARDWARE_PREPARE_SERVICE = REPO / 'rootfs/etc/systemd/system/r8q-hardware-prepare.service'
 USB_ROUTE_WRAPPER = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-up.sh'
 USB_ROUTE_HELPER = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-ensure.sh'
 USB_ROUTE_PROTOCOL = REPO / 'rootfs/usr/local/lib/r8q-usb-route/protocol-binding.env'
@@ -230,6 +232,18 @@ def safe_symlink(relative: str, target: str) -> None:
     os.lchown(path, 0, 0)
 
 
+def remove_managed_symlink(relative: str, target: str) -> None:
+    """Remove an old profile link only when it is the expected unit link."""
+    path = root_path(relative, f'legacy unit link {relative}')
+    if not path.exists() and not is_symlink(path):
+        return
+    st = lstat(path, f'legacy unit link {relative}')
+    require(stat.S_ISLNK(st.st_mode), f'legacy unit link is not a symlink: {path}')
+    require(os.readlink(path) == target,
+            f'legacy unit link points elsewhere: {path}')
+    path.unlink()
+
+
 def normalize_top_directory(path: Path, label: str) -> None:
     ensure_directory(path, label)
     os.lchown(path, 0, 0)
@@ -350,11 +364,18 @@ def move_stock_modules() -> list[str]:
 
 
 def enable_units() -> list[str]:
+    remove_managed_symlink(
+        'etc/systemd/system/multi-user.target.wants/r8q-usb-route.service',
+        '/etc/systemd/system/r8q-usb-route.service',
+    )
     links = {
         'etc/systemd/system/multi-user.target.wants/r8q-usb-gadget.service':
             '/etc/systemd/system/r8q-usb-gadget.service',
-        'etc/systemd/system/multi-user.target.wants/r8q-usb-route.service':
-            '/etc/systemd/system/r8q-usb-route.service',
+        # The hardware preparation unit is the sole early GPI/GENI owner. The
+        # legacy route unit remains installed as a read-only current-boot receipt
+        # witness, but is intentionally not enabled in this profile.
+        'etc/systemd/system/network-pre.target.wants/r8q-hardware-prepare.service':
+            '/etc/systemd/system/r8q-hardware-prepare.service',
         'etc/systemd/system/multi-user.target.wants/systemd-networkd.service':
             '/usr/lib/systemd/system/systemd-networkd.service',
         'etc/systemd/system/sockets.target.wants/systemd-networkd.socket':
@@ -393,6 +414,9 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
     safe_copy(NCM_SERVICE, 'etc/systemd/system/r8q-usb-gadget.service', 0o644)
     safe_copy(NCM_SCRIPT, 'usr/local/sbin/r8q-usb-gadget-up.sh', 0o755)
     safe_copy(USB_ROUTE_SERVICE, 'etc/systemd/system/r8q-usb-route.service', 0o644)
+    safe_copy(USB_ROUTE_WITNESS, 'usr/local/sbin/r8q-usb-route-witness.sh', 0o755)
+    safe_copy(HARDWARE_PREPARE_SERVICE,
+              'etc/systemd/system/r8q-hardware-prepare.service', 0o644)
     safe_copy(USB_ROUTE_WRAPPER, 'usr/local/sbin/r8q-usb-route-up.sh', 0o755)
     safe_copy(USB_ROUTE_HELPER, 'usr/local/sbin/r8q-usb-route-ensure.sh', 0o755)
     safe_copy(USB_ROUTE_PROTOCOL,
@@ -427,6 +451,8 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
         ('etc/systemd/system/r8q-usb-gadget.service', 0o644),
         ('usr/local/sbin/r8q-usb-gadget-up.sh', 0o755),
         ('etc/systemd/system/r8q-usb-route.service', 0o644),
+        ('usr/local/sbin/r8q-usb-route-witness.sh', 0o755),
+        ('etc/systemd/system/r8q-hardware-prepare.service', 0o644),
         ('usr/local/sbin/r8q-usb-route-up.sh', 0o755),
         ('usr/local/sbin/r8q-usb-route-ensure.sh', 0o755),
         ('usr/local/lib/r8q-usb-route/protocol-binding.env', 0o644),
@@ -458,6 +484,8 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
             'etc/systemd/system/r8q-usb-gadget.service',
             'usr/local/sbin/r8q-usb-gadget-up.sh',
             'etc/systemd/system/r8q-usb-route.service',
+            'usr/local/sbin/r8q-usb-route-witness.sh',
+            'etc/systemd/system/r8q-hardware-prepare.service',
             'usr/local/sbin/r8q-usb-route-up.sh',
             'usr/local/sbin/r8q-usb-route-ensure.sh',
             'usr/local/lib/r8q-usb-route/protocol-binding.env',

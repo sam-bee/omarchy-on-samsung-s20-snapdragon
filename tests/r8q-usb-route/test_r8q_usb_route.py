@@ -101,8 +101,31 @@ inc_count() { printf '%s\n' $(( $(read_count "$1") + 1 )) > "$1"; }
 case "$*" in
   *'w1@0x66 0x00 r1'*) printf '0x15\n' ;;
   *'w1@0x66 0x01 r1'*) printf '0x02\n' ;;
-  *'w1@0x25 0x08 r1'*) printf '0x81\n' ;;
-  *'w1@0x25 0x0a r1'*) printf '0x51\n' ;;
+  *'w1@0x25 0x08 r1'*)
+    case "$R8Q_MODE" in
+      nohost|nohost-nc) printf '0x00\n' ;;
+      nohost-bc) printf '0x01\n' ;;
+      nohost-dcd) printf '0x04\n' ;;
+      nohost-sink) printf '0x00\n' ;;
+      wall) printf '0x83\n' ;;
+      wall-no-vbus) printf '0x03\n' ;;
+      wall-dcd) printf '0x87\n' ;;
+      wall-wrong-bc) printf '0x80\n' ;;
+      unknown-bc) printf '0x80\n' ;;
+      *) printf '0x81\n' ;;
+    esac
+    ;;
+  *'w1@0x25 0x0a r1'*)
+    case "$R8Q_MODE" in
+      nohost|nohost-nc|nohost-bc|nohost-dcd) printf '0x50\n' ;;
+      nohost-sink) printf '0x51\n' ;;
+      wall-no-cc) printf '0x50\n' ;;
+      source) printf '0x52\n' ;;
+      cc-unknown) printf '0x53\n' ;;
+      i2c-failure) exit 7 ;;
+      *) printf '0x51\n' ;;
+    esac
+    ;;
   *'w1@0x25 0x0b r1'*)
     case "$R8Q_MODE" in
       water) printf '0x02\n' ;;
@@ -162,13 +185,14 @@ esac
     return sysfs, proc, etc, fake_bin, boot, protocol_dir
 
 
-def run_fixture(root: Path, sysfs: Path, proc: Path, etc: Path, fake_bin: Path, boot: Path, protocol_dir: Path, mode: str, *, hardware_mode: str = "1") -> subprocess.CompletedProcess[str]:
+def run_fixture(root: Path, sysfs: Path, proc: Path, etc: Path, fake_bin: Path, boot: Path, protocol_dir: Path, mode: str, *, hardware_mode: str = "1", optional_nohost: str = "0") -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.update(
         {
             "PATH": str(fake_bin) + os.pathsep + env["PATH"],
             "R8Q_OFFLINE_FIXTURE": "1",
             "R8Q_USB_ROUTE_HARDWARE_MODE": hardware_mode,
+            "R8Q_USB_ROUTE_OPTIONAL_NOHOST": optional_nohost,
             "R8Q_PROTOCOL_DIR": str(protocol_dir),
             "R8Q_CONFIG_FILE": str(etc / "r8q-usb-route.env"),
             "R8Q_SYSFS_ROOT": str(sysfs),
@@ -318,7 +342,55 @@ def main() -> int:
             assert result.returncode != 0, name
             assert not (root / "state" / BOOT_ID).exists(), name
         print("PASS: strict deployment identity config rejection")
-    print("PASS: opt-in, source bindings, route09 skip, COM_OPEN/COM_USB_CP write+verify, UIC/status fail-closed guards, concurrency, timeout, transaction failure, post-write mismatch, one-shot")
+        optional_cases = (("nohost", "deferred_no_vbus_no_connection"), ("wall", "deferred_wall_dcp"))
+        for mode, expected_outcome in optional_cases:
+            root = base / ("optional-" + mode)
+            root.mkdir()
+            sysfs, proc, etc, fake_bin, boot, protocol_dir = make_tree(root)
+            result = run_fixture(root, sysfs, proc, etc, fake_bin, boot, protocol_dir, mode, optional_nohost="1")
+            state = root / "state" / BOOT_ID
+            receipt = state / "receipt.txt"
+            raw = state / "i2c.raw"
+            assert result.returncode == 0, (mode, result.stderr)
+            text = receipt.read_text()
+            raw_text = raw.read_text()
+            assert "outcome=deferred" in text and "startup_gate=pass" in text
+            assert "optional_nohost=true" in text and "uic_reads=0" in text
+            assert "mailbox_writes_attempted=0" in text and "mailbox_writes_succeeded=0" in text
+            assert "w1@0x25 0x02" not in raw_text and "w2@" not in raw_text and "w3@" not in raw_text
+            assert f"route_outcome={expected_outcome}" in text
+
+        root = base / "optional-host"
+        root.mkdir()
+        sysfs, proc, etc, fake_bin, boot, protocol_dir = make_tree(root)
+        result = run_fixture(root, sysfs, proc, etc, fake_bin, boot, protocol_dir, "route09", optional_nohost="1")
+        receipt = (root / "state" / BOOT_ID / "receipt.txt").read_text()
+        raw = root / "state" / BOOT_ID / "i2c.raw"
+        command_list = commands(raw)
+        assert result.returncode == 0, result.stderr
+        assert "route_outcome=already_AP" in receipt and "outcome=pass" in receipt
+        assert "mailbox_writes_attempted=2" in receipt and "mailbox_writes_succeeded=2" in receipt
+        assert_common(command_list, fake_bin / "i2ctransfer")
+        assert not any("w3@0x25" in command for command in command_list)
+
+        root = base / "optional-nohost-legacy"
+        root.mkdir()
+        sysfs, proc, etc, fake_bin, boot, protocol_dir = make_tree(root)
+        result = run_fixture(root, sysfs, proc, etc, fake_bin, boot, protocol_dir, "nohost", optional_nohost="0")
+        receipt = (root / "state" / BOOT_ID / "receipt.txt").read_text()
+        assert result.returncode != 0 and "CC_STATUS0 is not SINK" in result.stderr
+        assert "mailbox_writes_attempted=0" in receipt
+
+        for mode, reason in (("source", "SOURCE"), ("cc-unknown", "unknown state"), ("unknown-bc", "unknown"), ("nohost-sink", "SINK while VBUSDet"), ("nohost-bc", "no-host CC status has BC"), ("nohost-dcd", "DCDtmo"), ("wall-no-vbus", "SINK while VBUSDet"), ("wall-no-cc", "no-host CC status has VBUS"), ("wall-dcd", "DCDTmo"), ("wall-wrong-bc", "unknown"), ("water", "water"), ("i2c-failure", "i2ctransfer failed")):
+            root = base / ("optional-fail-" + mode)
+            root.mkdir()
+            sysfs, proc, etc, fake_bin, boot, protocol_dir = make_tree(root)
+            result = run_fixture(root, sysfs, proc, etc, fake_bin, boot, protocol_dir, mode, optional_nohost="1")
+            receipt = (root / "state" / BOOT_ID / "receipt.txt").read_text()
+            raw = (root / "state" / BOOT_ID / "i2c.raw").read_text()
+            assert result.returncode != 0 and reason.lower() in result.stderr.lower(), (mode, result.stderr)
+            assert "mailbox_writes_attempted=0" in receipt and "w2@" not in raw and "w3@" not in raw
+        print("PASS: opt-in, source bindings, route09 skip, COM_OPEN/COM_USB_CP write+verify, UIC/status fail-closed guards, concurrency, timeout, transaction failure, post-write mismatch, one-shot")
     return 0
 
 

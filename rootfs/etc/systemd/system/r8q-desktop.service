@@ -1,10 +1,10 @@
 [Unit]
 Description=r8q normal-user Hyprland desktop
-Requires=r8q-usb-route.service r8q-gpu.service r8q-touch.service seatd.service
-# Ordering alone does not start battery drivers. Keep them disabled for UI
-# boots until the MAX77705 IRQ gate passes; deliberate battery trials must
-# finish before a desktop that has also been explicitly enabled.
-After=r8q-usb-route.service r8q-gpu.service r8q-touch.service seatd.service r8q-battery.service
+Requires=r8q-hardware-prepare.service r8q-gpu.service r8q-touch.service r8q-battery.service seatd.service
+# The standalone profile deliberately starts the battery gate before the UI;
+# the desktop must never become ready against an unverified MAX77705 IRQ DT
+# state or a partially initialized fuel/charger stack.
+After=r8q-hardware-prepare.service r8q-gpu.service r8q-touch.service r8q-battery.service seatd.service
 StartLimitIntervalSec=120
 StartLimitBurst=3
 ConditionPathExists=/home/alarm/.config/hypr/hyprland.lua
@@ -25,6 +25,7 @@ TTYPath=/dev/tty7
 StandardInput=tty
 TTYReset=yes
 TTYVHangup=yes
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
 ExecStart=/usr/local/bin/r8q-desktop-session
 KillMode=control-group
 TimeoutStopSec=15

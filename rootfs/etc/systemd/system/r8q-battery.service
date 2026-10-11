@@ -1,17 +1,16 @@
 [Unit]
-Description=r8q battery telemetry and MAX77705 charger (route-gated)
-# The gadget may be active before its UDC has reached configured state. Keep
-# both dependencies explicit and let r8q-battery-up.sh wait for that state.
-# r8q-usb-route.service remains the owner of the tested USB route and must
-# finish before any MAX77705 or MAX17042 driver is loaded.
-Requires=r8q-usb-gadget.service r8q-usb-route.service r8q-touch.service
-After=r8q-usb-gadget.service r8q-usb-route.service r8q-touch.service
-Before=graphical.target
+Description=r8q battery telemetry and MAX77705 charger (hardware-gated)
+# Charger ownership is gated by the adapter/startup preparation and touch
+# readiness. A host, configured UDC, gadget, or successful route mutation is
+# deliberately not a charger precondition.
+Requires=r8q-hardware-prepare.service r8q-touch.service
+After=r8q-hardware-prepare.service r8q-touch.service
+Before=graphical.target r8q-desktop.service r8q-audio-start.service
 
 [Service]
 Type=oneshot
-ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-gadget.service
-ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-usb-route.service
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-hardware-prepare.service
+ExecStartPre=/usr/bin/systemctl is-active --quiet r8q-touch.service
 ExecStart=/usr/local/sbin/r8q-battery-up.sh
 RemainAfterExit=yes
 # The USB wait and six bounded probe waits can total 165 seconds. Leave

@@ -43,12 +43,27 @@ test "${R8Q_USB_ROUTE_HARDWARE_MODE:-0}" = 1 || {
     echo "FAIL:hardware mode is disabled; set R8Q_USB_ROUTE_HARDWARE_MODE=1 only after independent review" >&2
     exit 1
 }
+OPTIONAL_NOHOST=${R8Q_USB_ROUTE_OPTIONAL_NOHOST:-0}
+case "$OPTIONAL_NOHOST" in
+    0|1) ;;
+    *) echo "FAIL:optional no-host mode must be 0 or 1" >&2; exit 1 ;;
+esac
+
+# Samsung's BC1.2 enum is source-bound: 0x03 is DCP (a wall/sink charger),
+# while 0x01 is SDP (the laptop/USB host path retained below).  This value is
+# deliberately local to the optional classification; the protocol binding
+# file and the host transaction remain byte-for-byte source-bound.
+WALL_BC_VALUE=0x03
+BC_USB_VALUE_NUM=$((BC_USB_VALUE))
+WALL_BC_VALUE_NUM=$((WALL_BC_VALUE))
+DCDTMO_MASK=0x04
 
 RECEIPT=
 RAW=
 ATTEMPT_DIR=
 MAILBOX_ATTEMPTED=0
 MAILBOX_SUCCEEDED=0
+UIC_READS=0
 TRANSACTION_INDEX=0
 TRANSFER_OUTPUT=
 TOTAL_START_CS=0
@@ -58,8 +73,8 @@ MANUAL_CLEANUP_REQUIRED=0
 die() {
     message=$*
     if test -n "${RECEIPT:-}" && test -f "$RECEIPT"; then
-        printf 'schema=r8q-usb-route/v1\noutcome=error\nreason=%s\nmailbox_writes_attempted=%s\nmailbox_writes_succeeded=%s\nmanual_cleanup_required=%s\nautomatic_retry=false\n' \
-            "$message" "$MAILBOX_ATTEMPTED" "$MAILBOX_SUCCEEDED" "$MANUAL_CLEANUP_REQUIRED" >> "$RECEIPT" 2>/dev/null || :
+        printf 'schema=r8q-usb-route/v1\noutcome=error\nreason=%s\nmailbox_writes_attempted=%s\nmailbox_writes_succeeded=%s\nuic_reads=%s\nmanual_cleanup_required=%s\nautomatic_retry=false\n' \
+            "$message" "$MAILBOX_ATTEMPTED" "$MAILBOX_SUCCEEDED" "$UIC_READS" "$MANUAL_CLEANUP_REQUIRED" >> "$RECEIPT" 2>/dev/null || :
     fi
     echo "FAIL:$message" >&2
     exit 1
@@ -270,7 +285,7 @@ UPTIME_START=$(cat "$PROC_ROOT/uptime" 2>/dev/null || printf 'unavailable')
     printf 'source_ccic_h_sha256=%s\nsource_muic_h_sha256=%s\nsource_private_h_sha256=%s\nsource_mfd_c_sha256=%s\nsource_irq_c_sha256=%s\nsource_usbc_c_sha256=%s\nsource_muic_c_sha256=%s\n' "$SOURCE_CCIC_H_SHA256" "$SOURCE_MUIC_H_SHA256" "$SOURCE_PRIVATE_H_SHA256" "$SOURCE_MFD_C_SHA256" "$SOURCE_IRQ_C_SHA256" "$SOURCE_USBC_C_SHA256" "$SOURCE_MUIC_C_SHA256"
     printf 'expected_kernel=%s\nexpected_machine_id=%s\nexpected_root_uuid=%s\nexpected_boot_sha256=%s\n' "$EXPECTED_KERNEL" "$EXPECTED_MACHINE_ID" "$EXPECTED_ROOT_UUID" "$EXPECTED_BOOT_SHA256"
     printf 'expected_vermagic=%s\nexpected_gpi_sha256=%s\nexpected_geni_sha256=%s\nexpected_helper_sha256=%s\nexpected_protocol_sha256=%s\n' "$EXPECTED_VERMAGIC" "$EXPECTED_GPI_SHA256" "$EXPECTED_GENI_SHA256" "$EXPECTED_HELPER_SHA256" "$EXPECTED_PROTOCOL_SHA256"
-    printf 'adapter_of_suffix=%s\npmic_address=%s\nmuic_address=%s\nallowed_initial_uic_mask=%s\ncc_status1_reject_mask=%s\n' "$EXPECTED_ADAPTER_OF_SUFFIX" "$PMIC_ADDRESS" "$MUIC_ADDRESS" "$ALLOWED_INITIAL_UIC_MASK" "$CC_STATUS1_REJECT_MASK"
+    printf 'adapter_of_suffix=%s\npmic_address=%s\nmuic_address=%s\nallowed_initial_uic_mask=%s\ncc_status1_reject_mask=%s\noptional_nohost_mode=%s\nwall_bc_value=%s\ndcdtmo_mask=%s\n' "$EXPECTED_ADAPTER_OF_SUFFIX" "$PMIC_ADDRESS" "$MUIC_ADDRESS" "$ALLOWED_INITIAL_UIC_MASK" "$CC_STATUS1_REJECT_MASK" "$OPTIONAL_NOHOST" "$WALL_BC_VALUE" "$DCDTMO_MASK"
     printf 'uic_freshness=inference_only\nuic_freshness_basis=quiet_initial_zero_or_cable_subset_then_strict_zero; no_datasheet_proof\n'
     printf 'mailbox_writes_attempted_before_initial_guard=0\nmailbox_writes_succeeded_before_initial_guard=0\nmanual_cleanup_required=0\n'
 } > "$RECEIPT" || die "receipt initialization failed"
@@ -353,6 +368,9 @@ run_i2c() {
 }
 
 read_byte() {
+    if test "$1" = "$MUIC_ADDRESS" && test "$2" = "$UIC_REGISTER"; then
+        UIC_READS=$((UIC_READS + 1))
+    fi
     run_i2c -y "$BUS_NUMBER" "w1@$1" "$2" r1
     value=$(printf '%s' "$TRANSFER_OUTPUT" | tr -d '\r\n ')
     case "$value" in
@@ -360,6 +378,15 @@ read_byte() {
         [0-9A-Fa-f][0-9A-Fa-f]) TRANSFER_VALUE=0x$(hex_lower "$value") ;;
         *) die "non-byte output for register $2" ;;
     esac
+}
+
+defer_nohost() {
+    reason=$1
+    printf 'route_outcome=deferred_%s\noptional_nohost=true\nstartup_gate=pass\nuic_reads=%s\nmailbox_writes_attempted=%s\nmailbox_writes_succeeded=%s\nmanual_cleanup_required=0\noutcome=deferred\nautomatic_retry=false\n' \
+        "$reason" "$UIC_READS" "$MAILBOX_ATTEMPTED" "$MAILBOX_SUCCEEDED" >> "$RECEIPT"
+    trap - HUP INT TERM
+    printf 'DEFERRED:no-host route transaction (%s) receipt=%s raw=%s\n' "$reason" "$RECEIPT" "$RAW"
+    exit 0
 }
 read_response_two() {
     run_i2c -y "$BUS_NUMBER" "w1@$MUIC_ADDRESS" "$RESPONSE_REGISTER" r2
@@ -416,16 +443,50 @@ PMIC_REV_NUM=$((PMIC_REV))
 test $((PMIC_REV_NUM & PMIC_REV_MASK)) -eq $((PMIC_REV_EXPECTED)) || die "unexpected PMIC revision: $PMIC_REV"
 read_byte "$MUIC_ADDRESS" "$VBUS_REGISTER"
 VBUS=$TRANSFER_VALUE
-test $((VBUS & VBUS_REQUIRED_MASK)) -ne 0 || die "VBUSDet is not asserted"
-test $((VBUS & BC_CHGTYP_MASK)) -eq $((BC_USB_VALUE)) || die "BC charger type is not USB type 1"
 read_byte "$MUIC_ADDRESS" "$CC_STATUS0_REGISTER"
 CC0A=$TRANSFER_VALUE
-test $((CC0A & CC_SINK_MASK)) -eq $((CC_SINK_VALUE)) || die "CC_STATUS0 is not SINK"
 read_byte "$MUIC_ADDRESS" "$CC_STATUS1_REGISTER"
 CC0B=$TRANSFER_VALUE
 test $((CC0B & CC_STATUS1_REJECT_MASK)) -eq 0 || die "CC_STATUS1 has water/short/overcurrent/error bits"
-printf 'pmic_id=%s\npmic_revision=%s\npmic_revision_low3=0x%02x\nbc_status_0x08=%s\nbc_vbusdet=true\nbc_chgtyp=0x%02x\ncc_status0_0x0a=%s\ncc_sink=true\ncc_status1_0x0b=%s\ncc_status1_reject_mask=%s\ncc_status1_safe=true\n' \
-    "$PMIC_ID" "$PMIC_REV" $((PMIC_REV_NUM & PMIC_REV_MASK)) "$VBUS" $((VBUS & BC_CHGTYP_MASK)) "$CC0A" "$CC0B" "$CC_STATUS1_REJECT_MASK" >> "$RECEIPT"
+VBUS_ASSERTED=$((VBUS & VBUS_REQUIRED_MASK))
+BC_CHGTYP_NUM=$((VBUS & BC_CHGTYP_MASK))
+DCDTMO_NUM=$((VBUS & DCDTMO_MASK))
+CC_STATE_NUM=$((CC0A & CC_SINK_MASK))
+printf 'pmic_id=%s\npmic_revision=%s\npmic_revision_low3=0x%02x\nbc_status_0x08=%s\nbc_vbusdet=%s\nbc_chgtyp=0x%02x\nbc_dcdtmo=0x%02x\ncc_status0_0x0a=%s\ncc_state=0x%02x\ncc_status1_0x0b=%s\ncc_status1_reject_mask=%s\ncc_status1_safe=true\n' \
+    "$PMIC_ID" "$PMIC_REV" $((PMIC_REV_NUM & PMIC_REV_MASK)) "$VBUS" "$VBUS_ASSERTED" "$BC_CHGTYP_NUM" "$DCDTMO_NUM" "$CC0A" "$CC_STATE_NUM" "$CC0B" "$CC_STATUS1_REJECT_MASK" >> "$RECEIPT"
+
+# Optional mode is intentionally decided from non-clearing PMIC status reads
+# only.  No UIC_INT read (which is an active event/ack read) or mailbox write
+# may occur on a deferred boot.  A source, water/error state, or unknown CC/BC
+# value remains a hard failure in every mode. In optional mode, DCDTmo must be
+# clear for both deferred states and the host route.
+if test "$OPTIONAL_NOHOST" = 1; then
+    test "$DCDTMO_NUM" -eq 0 || die "BC status has DCDTmo asserted"
+fi
+case "$CC_STATE_NUM" in
+    0)
+        test "$OPTIONAL_NOHOST" = 1 || die "CC_STATUS0 is not SINK"
+        test "$VBUS_ASSERTED" -eq 0 || die "no-host CC status has VBUSDet asserted"
+        test "$BC_CHGTYP_NUM" -eq 0 || die "no-host CC status has BC charger type 0x$(printf '%02x' "$BC_CHGTYP_NUM")"
+        defer_nohost no_vbus_no_connection
+        ;;
+    1)
+        if test "$VBUS_ASSERTED" -eq 0; then
+            die "CC_STATUS0 is SINK while VBUSDet is not asserted"
+        fi
+        case "$BC_CHGTYP_NUM" in
+            "$BC_USB_VALUE_NUM") ;;
+            "$WALL_BC_VALUE_NUM")
+                test "$OPTIONAL_NOHOST" = 1 || die "BC charger type is wall DCP, not USB type 1"
+                defer_nohost wall_dcp
+                ;;
+            0) die "BC charger type is unknown" ;;
+            *) die "BC charger type is unsupported: 0x$(printf '%02x' "$BC_CHGTYP_NUM")" ;;
+        esac
+        ;;
+    2) die "CC_STATUS0 reports SOURCE" ;;
+    *) die "CC_STATUS0 has unknown state: 0x$(printf '%02x' "$CC_STATE_NUM")" ;;
+esac
 
 # UIC_INT is an active event acknowledgment. Only the source-defined cable/
 # detection subset is admitted initially; bit7, SYS/DCD, bit2, or any other

@@ -104,15 +104,32 @@ the bounded desktop checks complete.
 
 ## Service ordering
 
-The tracked `r8q-desktop.service` is a normal-user service. Its recorded
-ordering is:
+The tracked `r8q-desktop.service` is a normal-user service. The standalone
+profile's startup graph is:
 
 ```text
-r8q-usb-route.service
-  -> r8q-gpu.service and r8q-touch.service
-  -> seatd.service
-  -> r8q-desktop.service (alarm, private /run/r8q-desktop, seat groups)
+r8q-hardware-prepare.service
+  -> r8q-usb-gadget.service, r8q-gpu.service, r8q-touch.service,
+     r8q-wifi.service, NetworkManager.service
+  -> r8q-battery.service (after touch; before desktop/audio)
+  -> r8q-audio-start.service and r8q-desktop.service
+     (desktop also requires GPU, touch and seatd)
 ```
+
+`r8q-hardware-prepare.service` is the sole early GPI/GENI owner. It runs the
+source-bound route wrapper in optional mode: exact no-VBUS/unplugged and wall-DCP
+sink tuples are successful deferred route results with no UIC reads or mailbox
+writes, while an SDP laptop source uses the existing guarded UIC/opcode/
+response/CONTROL1 transaction. The wrapper retains its identity, hash,
+module-ownership, status, water/error and active-MAX guards in every mode.
+
+The legacy `r8q-usb-route.service` remains installed as a read-only current-boot
+route witness, but the rootfs profile disables it by default and no desktop,
+Wi-Fi, NetworkManager, gadget or battery service requires it. It never invokes
+the raw helper a second time. Cable-left-in USB route recovery remains covered
+by the preparation unit; first USB recovery insertion and unplug/replug after
+MAX bind still require physical testing and a kernel-owned MUIC/USBC/DWC3 event
+path.
 
 The desktop service is guarded by the selected Lua, launcher, user shell
 config and `r8q.launcher` manifest/QML paths. Its session helper verifies the
@@ -127,39 +144,93 @@ does not invoke Omarchy's power, idle, monitor-watch, automount, lock or
 first-run hooks. Do not change the existing MAX77705 route ownership or add a
 display manager.
 
-The desktop unit requires only the USB route, GPU, touchscreen and seatd. It
-keeps an `After=r8q-battery.service` ordering edge for deliberate sequential
-trials, but has no `Requires` or `Wants` edge to activate battery drivers.
-Leave `r8q-battery.service` disabled for UI boots. A battery trial must stop or
-disable the desktop, complete separately, and only then permit an explicitly
-started desktop; the battery helper rejects an already-running compositor.
+The desktop unit now requires hardware preparation, GPU, touchscreen, battery
+and seatd. The battery helper starts before the compositor and rejects an
+already-running compositor; the graph therefore treats the charger/telemetry
+owner as a startup gate while keeping USB host configuration optional. The
+gadget and network paths remain separate capabilities after hardware
+preparation succeeds.
 
 ## Battery acceptance status
 
-Two cable-attached battery-only boots, identified by boot-ID prefixes
-`0961d59a…` and `e8a91236…`, loaded the fuel-gauge, MAX77705 MFD and charger
-modules. Both nevertheless failed acceptance: IRQ 215 produced an unhandled
-storm and reached the 100,001 event cap before the kernel disabled the IRQ.
-On the repeat boot, a sample at 62 seconds already showed about 67,000
-unhandled events while telemetry still answered; the storm therefore preceded
-the GENI SE0 timeouts. These are partial probe results, not a successful battery gate. The
-battery service's automatic startup is disabled for the UI profile, and no
-fully accepted charger or fuel-gauge runtime is claimed.
+Standalone review point 1 is complete for the normal USB-host case: two
+cable-attached automatic starts passed with battery autoload enabled. The
+corrected persistent audio DTB is now the charger-startup baseline. Its
+`max77705-int-default-state` has GPIO11 `bias-pull-up` and VIN selector 1, and
+tracked DTS compilation reproduces deployed DTB SHA-256 prefix `d3a06549…`.
+Two fresh cable-attached automatic starts, boot IDs
+`83cb3e73-81e6-49ae-a627-2dc4920e9262` and
+`822d6a6d-1fe6-4dbb-8fab-d8b7506df9f6`, ran with battery autoload enabled.
+Each completed 25 samples over about six minutes with zero parent/charger/
+CHGIN/AICL IRQ deliveries and zero unhandled counters, no IRQ disable or
+MAX/SE0 journal fault, Good telemetry, 24 C temperature and unchanged
+500000 uA input/charge limits. Desktop, audio, touch, GPU, Wi-Fi,
+NetworkManager and both SSH paths passed on both boots.
 
-An isolated three-second regmap trace around a guarded battery start captured
-2,377 successful INTSRC register `0x22` reads, all zero, plus the driver's
-expected charger-unmask write. GPIO11 was low before and after; all 2,969 IRQ
-deliveries were unhandled at capture end. The trace requested no extra I2C
-transactions and was removed after capture. Zero status reads explain the
-mainline handler's `IRQ_NONE`, but do not establish an electrical or device-tree
-fix. The `spmi-gpio` hwirq10 is the expected zero-based encoding of GPIO11.
-The next charging step is to resolve the stock pin/interrupt-source configuration
-before changing polarity, bias, masks or IRQ handling.
+| Boot | Mean sampled net current | Gauge charge |
+| --- | ---: | ---: |
+| `83cb3e73…` | +13162 uA | 3052000 -> 3057000 uAh |
+| `822d6a6d…` | +21712 uA | 3061000 -> 3066000 uAh |
+
+Normal USB-host and wall-power charger startup are accepted. The corrected
+wall boot `668d5aac-691b-4b50-8bae-85b146dddcda` reached hardware, battery,
+desktop, audio, GPU, touch, Wi-Fi, NetworkManager, SSH and UI readiness.
+Its 25-sample monitor spans 359.98 s, has stable 500000-uA readbacks,
+Good telemetry at 24 C, no unhandled IRQs or MAX/SE0 faults in the full
+770-line kernel journal, and mean sampled net current +50599.96 uA.
+Gauge charge rises 3156000 -> 3162000 uAh. Parent/charger/AICL totals stay
+at two handled initial events and CHGIN stays zero. The startup health
+guard passes. These idle-desktop/blanking measurements do not establish
+heavy-load charging headroom.
+
+Battery-only startup and first host insertion after MAX bind remain pending.
+The route witness remains disabled by default; the existing raw MUIC/USB-C
+route helper must not be called after MAX bind.
+
+### Conservative charger cap
+
+Wall firmware can expose inherited limits higher than the safe review budget.
+The first wall-power observation showed `input_current_limit=1750000` uA and
+`constant_charge_current=2100000` uA, with AICL later reporting `1225000` uA.
+The driver-owned `r8q-battery` startup helper now applies a conservative
+`500000`-uA cap after bounded healthy-charger checks. It prevalidates both
+existing values, fails closed on missing, malformed, out-of-range or below-cap
+data, never raises a limit, writes only values above the cap, and verifies an
+exact `500000`-uA readback. The input setter uses a `475000`-uA write because
+that driver's encoding reads back `500000` uA; the charge setter round-trips
+`500000` uA. If both values already read exactly `500000` uA, startup performs
+zero limit writes. No automatic BC1.2 higher-current policy is added, and
+heavy-load charging headroom remains unverified.
+
+### Battery indicator and warnings
+
+The `r8q.battery` shell plugin reads
+`/sys/class/power_supply/max170xx_battery` and
+`/sys/class/power_supply/max77705-charger` directly. It keeps charger `online`
+separate from gauge net current because the fuel gauge remains IRQ-less and
+reports `POWER_SUPPLY_STATUS=Unknown`, while the charger can report
+`Charging` during a negative-current sample. The bar uses `USB↑` for a
+confirmed source with positive current, `USB↓` for a confirmed source while
+the pack is under load, `BAT↓` for negative current without a confirmed source,
+and `USB?`/`BAT?` when direction or source is unknown; it never turns unknown
+status into `CHG`.
+
+The warning policy enters low at credible capacity <=10% and critical at <=5%.
+Low clears above 15%, critical clears above 10% and may first return to low,
+and each hysteresis transition produces at most one notification. Missing or
+invalid readings preserve the last delivered band and cannot re-arm a warning.
+A labeled critical-urgency test notification rendered in the actual shell,
+and wall screenshots show both `USB↑ 77%` and `USB↓ 77%`. Threshold fixtures
+passed. Polling runs every 30 seconds and notifications respect existing DND. Actual 10%/5%
+depletion and warning delivery at those thresholds remain untested, as does a
+discharge endurance test.
 
 ## Desktop acceptance status
 
-On 2026-10-10, boot `86957fa4-216c-4a47-b5ef-d84b6349d1a0` automatically
-started the desktop as `alarm` with battery autoload disabled. Hyprland,
+On 2026-10-10, the earlier UI-only boot `86957fa4-216c-4a47-b5ef-d84b6349d1a0`
+automatically started the desktop as `alarm` with battery autoload disabled.
+The later normal cable-attached profile uses the accepted battery autoload
+described above. Hyprland,
 Quickshell, Squeekboard and the plugin monitor remained running with zero
 service restarts through the final check more than six minutes after startup.
 The bar and keyboard rendered at the expected portrait scale; the clock and
@@ -199,7 +270,8 @@ The primary agent should pass each gate independently:
 4. Start the limited Quattro shell as `alarm`; verify the bar, `TERM` foot
    button, keyboard toggle and no unexpected first-party service process.
 5. Recheck both SSH routes, USB/MAX77705 route ownership and hashes after a
-   bounded UI reboot/soak. Battery-driver acceptance remains a separate gate.
+   bounded UI reboot/soak. USB-host and wall-charger startup are accepted; battery-only and post-bind
+   USB edge acceptance remain separate pending gates.
 
 Display blanking has its own configuration and acceptance below. Suspend,
 power-profile, firewall, SDDM, bootloader, filesystem and Apple-specific hardware
@@ -209,11 +281,13 @@ gates remain separate.
 
 The actual current Omarchy shell is Quickshell, not a Waybar-labelled
 substitute. The phone configuration enables workspaces, a clock, the image
-background, audio controls and the small `r8q.launcher` plugin. The plugin's touch-sized
+background, audio controls, the direct-telemetry `r8q.battery` plugin and the small `r8q.launcher` plugin. The plugin's touch-sized
 controls launch `foot`
-and call the verified `sm.puri.OSK0.SetVisible` session method. Notifications,
-Bluetooth, network, power, battery, idle, lock, OSD and polkit plugins
-are explicitly disabled until their phone package and hardware gates pass.
+and call the verified `sm.puri.OSK0.SetVisible` session method. Notifications
+are enabled for passive battery warnings. Bluetooth, network, power, generic Omarchy battery, idle, lock, OSD and polkit
+plugins remain explicitly disabled. The selected battery plugin has no power
+action. Warning rendering passed a labeled test; actual low-charge depletion
+remains untested.
 The earlier GTK3 touch/application and Squeekboard text-entry trial passed;
 that does not establish physical touch on the native Qt plugin buttons. The
 current root overlay places the clock on the right with no center anchor, as

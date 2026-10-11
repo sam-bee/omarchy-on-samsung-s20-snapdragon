@@ -4,13 +4,13 @@
 # This file is deliberately self-contained. It does not source a trial
 # helper, use modprobe, use a same-boot baseline, or perform raw I2C access.
 # The private module payload is outside /usr/lib/modules so udev coldplug
-# cannot load it before r8q-usb-route.service has completed.
+# cannot load it before r8q-hardware-prepare.service has completed.
 #
-# A first validation must reboot the phone with the USB cable attached. The
-# gadget can take a short time to become configured, so this helper waits at
-# most 45 seconds. A timeout is a hard failure and does not load any MAX
-# module. Configured UDC is only a link/readiness check; it does not prove
-# that the host is supplying current or that the battery is net charging.
+# The charger and gauge owner is deliberately independent of a USB host.  A
+# configured UDC is an optional gadget/desktop capability and is never used as
+# evidence that it is safe to bind MAX77705 or MAX17042.  Current-limit policy
+# is applied through the bound driver's power_supply attributes only; this
+# helper never performs raw I2C access.
 # Resolve a failed or partial run with an ordinary reboot; never unload GPI,
 # GENI, MAX77705, charger, or fuel-gauge drivers.
 set -u
@@ -27,8 +27,15 @@ MODULE_FUEL=$PAYLOAD_DIR/max17042_battery.ko
 MODULE_MFD=$PAYLOAD_DIR/max77705.ko
 MODULE_CHARGER=$PAYLOAD_DIR/max77705_charger.ko
 RECEIPT_DIR=/var/lib/r8q-battery
-USB_WAIT_SECONDS=45
 STAGE_WAIT_SECONDS=20
+CURRENT_LIMIT_CAP_UA=500000
+# max77705_charger.c encodes CHGIN in 25,000-uA steps but reports
+# (register+1)*25,000 uA.  475,000 therefore produces the required 500,000-uA
+# driver readback.  Charge current uses a 50,000-uA step and round-trips 500k.
+INPUT_LIMIT_WRITE_UA=475000
+CHARGE_CURRENT_WRITE_UA=500000
+CURRENT_PROPERTY_MIN_UA=100000
+CURRENT_PROPERTY_MAX_UA=3200000
 
 MAX17042_SHA256=dab402c9a954140ba1fb9d4ee7cc5b0ba4fdd710ceef6f3e690b81b8d7e3d0e0
 MAX77705_SHA256=d762ba600f60aeb861ba9bb74c963213db19eb4db9f928ef8538a1c27472a072
@@ -129,6 +136,26 @@ require_identity() {
     note "identity=kernel:$kernel machine_id:$machine_id root_uuid:$root_uuid"
 }
 
+require_irq_pin_state() {
+    dt_root=/sys/firmware/devicetree/base
+    [ -d "$dt_root" ] && [ ! -L "$dt_root" ] || die 'live device-tree base is unavailable'
+    need_cmd find
+    need_cmd od
+    pin_states=$(find "$dt_root" -type d -name max77705-int-default-state -print 2>/dev/null || true)
+    set -- $pin_states
+    [ "$#" = 1 ] || die "MAX77705 IRQ pin state is missing or ambiguous: $pin_states"
+    pin_state=$1
+    [ -f "$pin_state/pins" ] || die 'MAX77705 IRQ pin list is missing'
+    pins=$(tr -d '\000\r\n' < "$pin_state/pins" 2>/dev/null || true)
+    [ "$pins" = gpio11 ] || die "MAX77705 IRQ pin is not gpio11: $pins"
+    [ -f "$pin_state/bias-pull-up" ] || die 'MAX77705 IRQ pin lacks bias-pull-up'
+    [ ! -e "$pin_state/bias-disable" ] || die 'MAX77705 IRQ pin has bias-disable'
+    [ -f "$pin_state/power-source" ] || die 'MAX77705 IRQ power-source is missing'
+    power_source=$(od -An -t x1 -v "$pin_state/power-source" | tr -d ' \t\r\n')
+    [ "$power_source" = 00000001 ] || die "MAX77705 IRQ power-source is not big-endian 1: $power_source"
+    note "irq_pin_state=$pin_state pins=$pins bias_pull_up=true bias_disable=false power_source=1"
+}
+
 require_unit_active() {
     unit=$1
     need_cmd systemctl
@@ -137,42 +164,6 @@ require_unit_active() {
     [ "$state" = active ] || die "$unit is not active (state=$state)"
     [ "$result" = success ] || die "$unit did not finish successfully (result=$result)"
     note "unit=$unit state=$state result=$result"
-}
-
-current_usb_udc() {
-    for udc in /sys/class/udc/*; do
-        [ -d "$udc" ] || continue
-        state=$(read_trimmed "$udc/state" 2>/dev/null || true)
-        [ "$state" = configured ] || continue
-        printf '%s\n' "${udc##*/}"
-        return 0
-    done
-    return 1
-}
-
-require_usb_configured() {
-    udc=$(current_usb_udc) || die 'no configured USB UDC'
-    if [ -r /sys/class/net/usb0/operstate ]; then
-        net_state=$(read_trimmed /sys/class/net/usb0/operstate || true)
-        case "$net_state" in
-            up|unknown) ;;
-            *) die "usb0 is not usable: operstate=$net_state" ;;
-        esac
-    fi
-    note "usb_health=configured udc=$udc"
-}
-
-wait_for_usb_configured() {
-    attempt=0
-    while [ "$attempt" -lt "$USB_WAIT_SECONDS" ]; do
-        if current_usb_udc >/dev/null 2>&1; then
-            require_usb_configured
-            return 0
-        fi
-        sleep 1
-        attempt=$((attempt + 1))
-    done
-    die "USB UDC did not become configured within ${USB_WAIT_SECONDS}s; attach cable and reboot"
 }
 
 module_loaded() {
@@ -347,14 +338,64 @@ validate_charger_telemetry() {
     dump_supply max77705-charger
 }
 
-require_default_charge_policy() {
-    input_limit=$(read_trimmed /sys/class/power_supply/max77705-charger/input_current_limit 2>/dev/null || true)
-    charge_current=$(read_trimmed /sys/class/power_supply/max77705-charger/constant_charge_current 2>/dev/null || true)
-    [ "$input_limit" = 500000 ] || \
-        die "unexpected input_current_limit=$input_limit (expected unchanged 500000uA)"
-    [ "$charge_current" = 500000 ] || \
-        die "unexpected constant_charge_current=$charge_current (expected unchanged 500000uA)"
-    note "current_limit_policy=unchanged input_current_limit=$input_limit constant_charge_current=$charge_current"
+write_sysfs_value() {
+    value=$1
+    path=$2
+    printf '%s\n' "$value" > "$path" || return 1
+}
+
+enforce_charge_current_cap() {
+    charger_client=$1
+    charger_driver=$(client_driver "$charger_client")
+    case "$charger_driver" in
+        */i2c/drivers/max77705-charger) ;;
+        *) die "charger current properties are not owned by max77705-charger: $charger_driver" ;;
+    esac
+
+    input_path=/sys/class/power_supply/max77705-charger/input_current_limit
+    charge_path=/sys/class/power_supply/max77705-charger/constant_charge_current
+    # Read and validate both inherited values before making either write.  A
+    # malformed, missing, below-cap, or outside-driver-range value leaves the
+    # charger untouched and forces the normal reboot rollback boundary.
+    input_limit=$(read_trimmed "$input_path" 2>/dev/null || true)
+    charge_current=$(read_trimmed "$charge_path" 2>/dev/null || true)
+    require_range input_current_limit_uA "$input_limit" "$CURRENT_PROPERTY_MIN_UA" "$CURRENT_PROPERTY_MAX_UA"
+    require_range constant_charge_current_uA "$charge_current" "$CURRENT_PROPERTY_MIN_UA" "$CURRENT_PROPERTY_MAX_UA"
+    [ "$input_limit" -ge "$CURRENT_LIMIT_CAP_UA" ] || \
+        die "input_current_limit_uA is below conservative cap: $input_limit"
+    [ "$charge_current" -ge "$CURRENT_LIMIT_CAP_UA" ] || \
+        die "constant_charge_current_uA is below conservative cap: $charge_current"
+
+    input_write=none
+    charge_write=none
+    if [ "$input_limit" -gt "$CURRENT_LIMIT_CAP_UA" ]; then
+        input_write=$INPUT_LIMIT_WRITE_UA
+    fi
+    if [ "$charge_current" -gt "$CURRENT_LIMIT_CAP_UA" ]; then
+        charge_write=$CHARGE_CURRENT_WRITE_UA
+    fi
+
+    # Order matters: lower the input budget first, then the battery charge
+    # current.  Never write a property that is already at the cap.
+    if [ "$input_write" != none ]; then
+        write_sysfs_value "$input_write" "$input_path" || \
+            die "failed to write input_current_limit_uA=$input_write"
+        input_readback=$(read_trimmed "$input_path" 2>/dev/null || true)
+        [ "$input_readback" = "$CURRENT_LIMIT_CAP_UA" ] || \
+            die "input_current_limit_uA readback is not $CURRENT_LIMIT_CAP_UA: $input_readback"
+    fi
+    if [ "$charge_write" != none ]; then
+        write_sysfs_value "$charge_write" "$charge_path" || \
+            die "failed to write constant_charge_current_uA=$charge_write"
+    fi
+
+    input_readback=$(read_trimmed "$input_path" 2>/dev/null || true)
+    charge_readback=$(read_trimmed "$charge_path" 2>/dev/null || true)
+    [ "$input_readback" = "$CURRENT_LIMIT_CAP_UA" ] || \
+        die "input_current_limit_uA readback is not $CURRENT_LIMIT_CAP_UA: $input_readback"
+    [ "$charge_readback" = "$CURRENT_LIMIT_CAP_UA" ] || \
+        die "constant_charge_current_uA readback is not $CURRENT_LIMIT_CAP_UA: $charge_readback"
+    note "current_limit_policy=conservative_cap cap_uA=$CURRENT_LIMIT_CAP_UA input_inherited_uA=$input_limit charge_inherited_uA=$charge_current input_write_uA=$input_write charge_write_uA=$charge_write input_readback_uA=$input_readback charge_readback_uA=$charge_readback"
 }
 
 require_no_active_compositor() {
@@ -383,15 +424,17 @@ need_cmd awk
 need_cmd date
 need_cmd id
 need_cmd insmod
+need_cmd find
+need_cmd od
 need_cmd readlink
 need_cmd sleep
 need_cmd tr
 INSMOD=$(command -v insmod)
 new_receipt
 require_identity
-require_unit_active r8q-usb-gadget.service
-require_unit_active r8q-usb-route.service
-wait_for_usb_configured
+require_unit_active r8q-hardware-prepare.service
+require_unit_active r8q-touch.service
+require_irq_pin_state
 require_no_active_compositor
 require_no_max_modules
 require_no_max_supplies
@@ -408,7 +451,7 @@ verify_module "$MODULE_CHARGER" "$MAX77705_CHARGER_SHA256"
 # The expected probe-side mutation for this DT is MAX17042 SALRT=0xff00
 # because the fuel-gauge node has no IRQ. This helper deliberately observes
 # the resulting power_supply data and never performs a raw register write.
-note 'policy=route-first; no raw I2C; no current-limit writes; no driver unload'
+note 'policy=route-first; no raw I2C; driver-owned conservative current cap; no driver unload'
 load_module "$MODULE_FUEL" max17042_battery
 wait_for_supply max170xx_battery
 require_simple_mfd_binding
@@ -416,7 +459,6 @@ require_unbound_client 0066
 require_unbound_client 0069
 require_absent_client 0025
 validate_fuel_telemetry
-require_usb_configured
 note 'fuel_stage=pass'
 
 load_module "$MODULE_MFD" max77705
@@ -429,7 +471,6 @@ case "$mfd_driver" in
 esac
 require_unbound_client 0069
 require_absent_client 0025
-require_usb_configured
 note "mfd_stage=pass client_0066_driver=$mfd_driver"
 
 load_module "$MODULE_CHARGER" max77705_charger
@@ -443,9 +484,8 @@ case "$charger_driver" in
 esac
 validate_fuel_telemetry
 validate_charger_telemetry
-require_default_charge_policy
+enforce_charge_current_cap "$client_0069"
 require_absent_client 0025
-require_usb_configured
 note "charger_stage=pass client_0069_driver=$charger_driver"
 note 'charging_claim=not established by startup; use a bounded time-series monitor'
 note "receipt=$RECEIPT"
