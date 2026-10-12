@@ -9,7 +9,7 @@ charging, not acceptable throughput for every source or workload.
 ## Current limits and source evidence
 
 `r8q-battery-up.sh` conservatively caps both inherited input and constant-charge
-settings at 500000 uA. It retains smaller settings. The current #5 boot
+settings at 500000 uA. It retains smaller settings. The overnight #5 boot
 `d2aa17ca-e0ea-47b9-b5bb-3549f845dade` inherited 500000/500000 uA, so that
 startup performed no limit writes. Earlier wall firmware inherited 1.75 A input
 and 2.1 A charge; AICL reduced input to 1.225 A before the helper applied its
@@ -89,6 +89,58 @@ The complete local archive is
 `out/charging-rate-20261012/charging-final-evidence01.tar`, SHA256
 `8f97be498951d84d756f143fcf82b304bd7d1d897f2236f9df7d0ad9fd90dd07`.
 Primary and Luna independently checked the measurements and restoration.
+
+## Fresh wall-source check on October 12
+
+The operator connected an adapter with a USB-A-to-C cable; its output rating
+was unknown. The phone was already 100%/Full, healthy at about 30 C. The
+existing boot's source receipt still described the laptop connection, and
+Type-C, extcon and USB-role interfaces were absent. A programmed 500 mA input
+limit and a stale configured UDC therefore could not identify the new source.
+
+After verifying all seven protected manifests and the original #5 EFI/DTB
+hashes, an ordinary wall-connected reboot captured fresh source status before
+MAX driver binding. Boot `760acab7-af53-4c5d-be34-16274831aaf1` reports BC
+`0x83`, charger type `0x03` (DCP), no DCD timeout, CC `0x51/0x08`, and VBUS
+present. Preparation correctly deferred the USB host route with zero UIC
+reads and zero mailbox writes. This establishes dedicated-charger
+classification; it does not measure the adapter's exact rated amperage.
+A DCP may become current limited and its voltage may drop above 500 mA; the
+classification alone is not proof of a particular 1.5 or 2.1 A rating. See
+[NXP's BC1.2 explanation, page 45](https://www.nxp.com/docs/en/application-note/AN11060.pdf).
+
+The startup log distinguishes firmware settings from the Linux policy:
+
+| Setting | Inherited firmware readback | After Linux startup cap |
+| --- | ---: | ---: |
+| Input current limit | 1.8 A | 0.5 A |
+| Battery-side charge ceiling | 2.1 A | 0.5 A |
+
+These inherited register settings are not an adapter-rating measurement or
+approval to use a 2.1 A battery target. The current board profile remains
+1.5 A. They do confirm that the software cap reduces wall-boot settings.
+
+All required services and Wi-Fi SSH returned, all seven manifests passed,
+and full-boot journal review found no charger/kernel faults. The usual six
+known warnings remained. One handled parent/charger/AICL delivery was visible,
+with zero unhandled counts; debugfs disable flags remained unavailable.
+The screen was reblanked and the persistent policy selected Wi-Fi saving On
+with charger status Full. The corrected 500 mA gadget descriptor survived this
+fresh startup. No kernel candidate or higher-current profile was installed.
+
+No ceiling throughput experiment was run at 100%/Full, where taper or
+maintenance would dominate. A private guarded 500/1000/500 mA comparison is
+prepared for a lower battery level, with input kept at 500 mA and automatic
+restoration. Its revised cleanup restores CC500 even if AICL changes the input
+limit, recording that change without writing the input property. Full-capacity
+and input-change fixtures pass. This future experiment isolates the
+battery-side ceiling; it cannot measure higher wall-source capability while
+the input cap stays at 500 mA. A useful next charge comparison needs roughly
+70–80% battery. There is no evidence yet that an adapter replacement is needed.
+
+Local source/startup evidence is
+`out/charging-wall-20261012/wall-source-evidence01.tar`, SHA256
+`292b5a0c5a980a3f0aa31c2a02943d92879dcfb991b8fc4535acefb19614e60d`.
 
 ## Remaining work
 
