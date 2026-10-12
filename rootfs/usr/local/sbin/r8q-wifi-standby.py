@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Use Wi-Fi power saving while the r8q display is blank on healthy battery.
+"""Use Wi-Fi power saving while the r8q display is blank with healthy power readings.
 
 The NetworkManager profile keeps powersave disabled as the recovery default.
 This service changes only the runtime iw switch, never PCI PM or ASPM.
-Missing telemetry, an awake display, source insertion or lost association
-requests off. A failed iw operation exits after a final off attempt.
+Missing telemetry, an awake display, an unvalidated source state or lost
+association requests off. A healthy connected charging source is accepted
+alongside the existing battery-only state. A failed iw operation exits after
+a final off attempt.
 """
 from pathlib import Path
 import argparse
@@ -46,16 +48,24 @@ def set_power(value):
 
 
 def decision(sysroot=SYS):
-    """Pure reads: only a complete healthy blank/battery snapshot allows on."""
+    """Pure reads: only a complete healthy blank/source snapshot allows on."""
     try:
         if read(sysroot / "class/drm/card0-DSI-1/dpms") != "Off":
             return "off", "display-awake-or-unavailable"
         charger = sysroot / "class/power_supply/max77705-charger"
         fuel = sysroot / "class/power_supply/max170xx_battery"
-        if read(charger / "online") != "0":
+        online = read(charger / "online")
+        if online not in ("0", "1"):
             return "off", "source-connected-or-unavailable"
-        if read(charger / "status") != "Discharging":
-            return "off", "charger-status"
+        status = read(charger / "status")
+        if online == "0":
+            if status != "Discharging":
+                return "off", "charger-status"
+            on_reason = "blank-on-battery"
+        else:
+            if status not in ("Charging", "Full") or read(charger / "health") != "Good":
+                return "off", "charger-status-or-health"
+            on_reason = "blank-on-charging"
         if read(fuel / "present") != "1" or read(fuel / "health") != "Good":
             return "off", "fuel-health"
         capacity, temperature = int(read(fuel / "capacity")), int(read(fuel / "temp"))
@@ -64,7 +74,7 @@ def decision(sysroot=SYS):
             return "off", "fuel-range"
         if read(sysroot / f"class/net/{IFACE}/carrier") != "1":
             return "off", "link-down"
-        return "on", "blank-on-battery"
+        return "on", on_reason
     except (OSError, ValueError):
         return "off", "telemetry-unavailable"
 

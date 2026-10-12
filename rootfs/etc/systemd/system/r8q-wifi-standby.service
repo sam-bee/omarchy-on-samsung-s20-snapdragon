@@ -1,5 +1,5 @@
 [Unit]
-Description=r8q Wi-Fi saving while blank on battery
+Description=r8q Wi-Fi saving while the display is blank
 Requires=r8q-wifi.service r8q-battery.service
 After=r8q-wifi.service r8q-battery.service NetworkManager.service r8q-desktop.service
 

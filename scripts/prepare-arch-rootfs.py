@@ -28,6 +28,7 @@ ROOTDIR = PREPARATION / 'rootdir'
 
 NCM_SERVICE = REPO / 'rootfs/etc/systemd/system/r8q-usb-gadget.service'
 NCM_SCRIPT = REPO / 'rootfs/usr/local/sbin/r8q-usb-gadget-up.sh'
+NCM_MAXPOWER = REPO / 'rootfs/usr/local/libexec/r8q-gadget-maxpower.py'
 GETTY_OVERLAY = REPO / 'rootfs/etc/systemd/system/getty@tty1.service.d/autologin.conf'
 USB_ROUTE_SERVICE = REPO / 'rootfs/etc/systemd/system/r8q-usb-route.service'
 USB_ROUTE_WITNESS = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-witness.sh'
@@ -327,6 +328,10 @@ def check_runtime_files() -> dict[str, str]:
         path = root_path(relative, label)
         st = lstat(path, label)
         require(stat.S_ISREG(st.st_mode), f'{label} is not a regular file: {path}')
+    # Python is intentionally optional at bootstrap.  The startup wrapper
+    # performs a shell-only MaxPower write for an unbound gadget and defers a
+    # bound legacy descriptor when Python is absent; the helper is still copied
+    # into the image for later transactional normalization.
     return {'sshd': sshd, **required}
 
 
@@ -413,6 +418,7 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
     )
     safe_copy(NCM_SERVICE, 'etc/systemd/system/r8q-usb-gadget.service', 0o644)
     safe_copy(NCM_SCRIPT, 'usr/local/sbin/r8q-usb-gadget-up.sh', 0o755)
+    safe_copy(NCM_MAXPOWER, 'usr/local/libexec/r8q-gadget-maxpower.py', 0o755)
     safe_copy(USB_ROUTE_SERVICE, 'etc/systemd/system/r8q-usb-route.service', 0o644)
     safe_copy(USB_ROUTE_WITNESS, 'usr/local/sbin/r8q-usb-route-witness.sh', 0o755)
     safe_copy(HARDWARE_PREPARE_SERVICE,
@@ -450,6 +456,7 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
         ('etc/systemd/network/20-usb0.network', 0o644),
         ('etc/systemd/system/r8q-usb-gadget.service', 0o644),
         ('usr/local/sbin/r8q-usb-gadget-up.sh', 0o755),
+        ('usr/local/libexec/r8q-gadget-maxpower.py', 0o755),
         ('etc/systemd/system/r8q-usb-route.service', 0o644),
         ('usr/local/sbin/r8q-usb-route-witness.sh', 0o755),
         ('etc/systemd/system/r8q-hardware-prepare.service', 0o644),
@@ -483,6 +490,7 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
             'etc/systemd/network/20-usb0.network',
             'etc/systemd/system/r8q-usb-gadget.service',
             'usr/local/sbin/r8q-usb-gadget-up.sh',
+            'usr/local/libexec/r8q-gadget-maxpower.py',
             'etc/systemd/system/r8q-usb-route.service',
             'usr/local/sbin/r8q-usb-route-witness.sh',
             'etc/systemd/system/r8q-hardware-prepare.service',

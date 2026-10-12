@@ -451,8 +451,9 @@ and [hypridle configuration](https://wiki.hypr.land/Hypr-Ecosystem/hypridle/).
 
 The phone-local `r8q-wifi-standby.service` changes only
 `iw dev wlp1s0 set power_save on/off`. It enables saving when `DSI-1` reports
-DPMS Off, MAX77705 reports offline/Discharging, the fuel gauge is present and
-healthy (15–100%, 0–40 C, 2.5–4.5 V), and Wi-Fi is associated. It requests Off
+DPMS Off, MAX77705 reports either offline/Discharging or online Charging/Full
+with charger health Good, the fuel gauge is present and healthy (15–100%,
+0–40 C, 2.5–4.5 V), and Wi-Fi is associated. It requests Off
 when any condition fails. Display/source/carrier checks run every two seconds;
 association and actual runtime-state checks run every ten seconds. Commands
 have five-second limits, so transitions may take longer if a command stalls.
@@ -474,7 +475,7 @@ Mean monitored idle power with saving enabled remained about 1.41 W, with
 temperature stable at 24 C. Wi-Fi SSH worked in both enabled phases. This is
 not a long-duration endurance or throughput acceptance claim.
 
-The automatic policy passed dispatcher wake (Off in 0.76 s), reblank (On in
+The original October 11 policy passed dispatcher wake (Off in 0.76 s), reblank (On in
 1.02 s), service-stop cleanup and restart. Actual wall-charger insertion also
 selected Off; physical source removal selected On again. The service also
 started automatically on fresh battery-only boot `548b2bc6…`. That boot passed
@@ -483,6 +484,30 @@ selected On in 0.77 s, stop restored Off and restart selected On. All eight
 CPUs retained zero deep-state usage throughout. The protected additive helper/unit baseline is `/root/r8q-wifi-standby.sha256`;
 phone evidence is in `/root/r8q-standby-20261011/` and local receipts in
 `out/standby-20261011/`.
+
+On October 12 the policy was extended to healthy connected charging sources.
+The original behavior disabled saving on insertion even with the screen blank,
+wasting part of the charging budget. Four controlled Off/On/Off/On phases,
+13 samples each across 180 seconds after settling, averaged 180.1 versus
+254.7 mA net charge with both charger limits unchanged at 500 mA. Each Off
+phase gained 9,000 uAh and each On phase 13,000 uAh; temperature was 30.1–30.3 C.
+Wi-Fi association and DPMS Off held throughout. IRQ identities and zero
+unhandled counts stayed stable; IRQ disable flags were unavailable in debugfs.
+The bounded comparison restored Off and the original service before deployment.
+
+The updated policy passed five live checks on the original #5 kernel:
+charging/blank On, wake Off (1.57 s), reblank On (0.80 s), stop cleanup Off,
+and restart On. CPU deep-idle counters stayed unchanged. Its 29 offline
+sysfs/link fixtures cover charging/full, inconsistent or missing source state,
+battery behavior, telemetry bounds and carrier/association loss. The existing
+unit ordering and cleanup remain; its description now includes charging.
+Only the helper/unit lines in `/root/r8q-wifi-standby.sha256` were updated,
+with their originals retained in
+`/root/r8q-charging-rate-20261012/wifi-install01/`. The five other protected
+manifests were hash-checked unchanged. Evidence is under
+`/root/r8q-charging-rate-20261012/`, with local transport receipts in
+`out/standby-20261011/` and the comparison archive in
+`out/charging-rate-20261012/`.
 
 ## Standby kernel and USB status
 

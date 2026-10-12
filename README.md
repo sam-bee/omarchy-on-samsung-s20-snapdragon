@@ -260,11 +260,19 @@ polling, not overnight endurance results. Simpledrm blanking still leaves the
 firmware display powered; native panel shutdown and system sleep remain work.
 
 `r8q-wifi-standby.service` enables the runtime Wi-Fi power-save switch only
-while the display is blank, the charger is offline and battery/link readings
-are healthy. Wake, source insertion, missing telemetry or carrier loss request
-power saving Off. The NetworkManager profile retains Off as the recovery
+while the display is blank and battery/link readings are healthy. It accepts
+offline/Discharging and connected Charging/Full with charger health Good.
+Wake, inconsistent or missing telemetry, and carrier loss request power saving
+Off. The NetworkManager profile retains Off as the recovery
 default; PCI runtime PM and ASPM are unchanged. See
 [standby policy and acceptance](docs/r8q-desktop.md#wi-fi-standby-policy).
+
+The October 12 charging comparison kept both charger limits at 500 mA and
+repeated Wi-Fi saving Off/On/Off/On. Net battery charge averaged 180.1 mA Off
+versus 254.7 mA On, a 41.4% increase. Charge-counter movement corroborated the
+gain; temperature stayed 30.1–30.3 C. This is a short controlled comparison,
+not a full charge-cycle estimate. Saving while blank on healthy charging power
+is now installed and passed live wake, reblank, stop and restart checks.
 
 ### Battery
 
@@ -339,6 +347,15 @@ The current laptop boot inherited 500000/500000 uA and required no cap writes.
 These endpoint readings show slow net accumulation; they do not measure input
 power or establish charging speed across source types. Startup acceptance
 does not close the charging-performance work.
+
+The same boot's early source receipt identifies an SDP/default 500 mA source;
+it does not authorize higher input current. A separate gadget bug advertised
+only 2 mA to the laptop. The persistent NCM startup helper now normalizes
+ConfigFS MaxPower to 500 mA, validating the known identity and restoring the
+old binding/value if a bound-gadget transition fails. The laptop verified
+500 mA at 480 Mb/s, and both SSH routes passed after the correction. This
+descriptor repair does not negotiate a higher current or increase either
+charger limit. See [charging evidence and remaining work](docs/r8q-charging.md).
 
 The accepted normal USB-host boots measured mean net current of about +13 mA and
 +22 mA, with charge increasing by about 5,000 uAh in each six-minute monitor.
