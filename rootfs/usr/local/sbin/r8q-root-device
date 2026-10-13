@@ -1,0 +1,141 @@
+#!/bin/sh
+# Resolve and validate the mounted r8q root device.
+#
+# The normal profile is deliberately strict about the known plaintext root.
+# Once the image-owned encrypted-root profile exists, the mounted root must be
+# cryptroot and its one backing partition must identify the expected USERDATA
+# partition and LUKS UUID.  This helper prints only the validated root source.
+set -eu
+umask 077
+PATH=/usr/bin:/usr/sbin:/bin:/sbin
+LC_ALL=C
+export PATH LC_ALL
+
+EXPECTED_ROOT_UUID=217b9308-40c7-4eb0-90a9-09ed4e233173
+EXPECTED_USERDATA_PARTUUID=1b81e7e6-f50d-419b-a739-2aeef8da3335
+PLAINTEXT_ROOT_DEVICE=/dev/sda36
+ENCRYPTED_ROOT_SOURCE=/dev/mapper/cryptroot
+
+die()
+{
+	printf 'r8q-root-device: %s\n' "$*" >&2
+	exit 1
+}
+
+if test "${R8Q_ROOT_DEVICE_OFFLINE:-0}" = 1; then
+	ETC_ROOT=${R8Q_ROOT_DEVICE_ETC_ROOT:-/etc}
+	PROFILE=${R8Q_ROOT_DEVICE_PROFILE:-$ETC_ROOT/r8q-encrypted-root.env}
+	FINDMNT=${R8Q_ROOT_DEVICE_FINDMNT:-findmnt}
+	BLKID=${R8Q_ROOT_DEVICE_BLKID:-blkid}
+	STAT=${R8Q_ROOT_DEVICE_STAT:-stat}
+	CRYPTSETUP=${R8Q_ROOT_DEVICE_CRYPTSETUP:-cryptsetup}
+else
+	ETC_ROOT=/etc
+	PROFILE=/etc/r8q-encrypted-root.env
+	FINDMNT=findmnt
+	BLKID=blkid
+	STAT=stat
+	CRYPTSETUP=cryptsetup
+fi
+
+need_cmd()
+{
+	command -v "$1" >/dev/null 2>&1 || die "$1 is unavailable"
+}
+
+for command_name in "$FINDMNT" "$BLKID" "$STAT"; do
+	need_cmd "$command_name"
+done
+
+trim_line()
+{
+	tr -d '\r\n'
+}
+
+uuid_ok()
+{
+	value=$1
+	case "$value" in
+		????????-????-????-????-????????????) ;;
+		*) return 1 ;;
+	esac
+	case "$value" in
+		*[!0123456789abcdef-]*) return 1 ;;
+	esac
+}
+
+root_source=$($FINDMNT -n -o SOURCE / 2>/dev/null | trim_line) || die 'cannot identify mounted root source'
+root_fstype=$($FINDMNT -n -o FSTYPE / 2>/dev/null | trim_line) || die 'cannot identify mounted root filesystem type'
+root_uuid=$($FINDMNT -n -o UUID / 2>/dev/null | trim_line) || die 'cannot identify mounted root filesystem UUID'
+test "$root_fstype" = ext4 || die "mounted root is not ext4: $root_fstype"
+test "$root_uuid" = "$EXPECTED_ROOT_UUID" || die 'mounted root filesystem UUID mismatch'
+
+if test -e "$PROFILE" || test -L "$PROFILE"; then
+	test -f "$PROFILE" || die 'encrypted-root profile is not a regular file'
+	test ! -L "$PROFILE" || die 'encrypted-root profile is a symlink'
+	profile_meta=$($STAT -c '%u:%g:%a' "$PROFILE" 2>/dev/null) || die 'cannot inspect encrypted-root profile ownership'
+	old_ifs=$IFS
+	IFS=:
+	set -- $profile_meta
+	IFS=$old_ifs
+	test "$#" = 3 || die 'encrypted-root profile ownership metadata is malformed'
+	test "$1" = 0 && test "$2" = 0 || die 'encrypted-root profile is not root-owned'
+	case "$3" in
+		???) ;;
+		*) die 'encrypted-root profile mode is malformed' ;;
+	esac
+	profile_group=${3%?}
+	profile_group=${profile_group#?}
+	profile_other=${3#??}
+	case "$profile_group$profile_other" in
+		*[2367]*) die 'encrypted-root profile is group/world-writable' ;;
+	esac
+
+	luks_uuid=
+	luks_count=0
+	while IFS= read -r profile_line || test -n "$profile_line"; do
+		case "$profile_line" in
+			''|'#'*) continue ;;
+			LUKS_UUID=*)
+				test "$luks_count" = 0 || die 'duplicate LUKS_UUID in encrypted-root profile'
+				luks_uuid=${profile_line#*=}
+				luks_count=1
+				;;
+			*) die 'unknown encrypted-root profile variable' ;;
+		esac
+	done < "$PROFILE" || die 'cannot read encrypted-root profile'
+	test "$luks_count" = 1 || die 'encrypted-root profile must contain one LUKS_UUID'
+	uuid_ok "$luks_uuid" || die 'encrypted-root profile LUKS_UUID is malformed'
+	test "$root_source" = "$ENCRYPTED_ROOT_SOURCE" || die 'encrypted-root profile is present but mounted root is not cryptroot'
+
+	need_cmd "$CRYPTSETUP"
+	status=$($CRYPTSETUP status cryptroot 2>/dev/null) || die 'cryptroot mapper status is unavailable'
+	type_lines=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*type:[[:space:]]*//p' | wc -l)
+	test "$type_lines" = 1 || die 'cryptroot must report exactly one type'
+	mapper_type=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*type:[[:space:]]*//p' | trim_line)
+	test "$mapper_type" = LUKS2 || die 'cryptroot mapper is not type LUKS2'
+	backing_lines=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*device:[[:space:]]*//p' | wc -l)
+	test "$backing_lines" = 1 || die 'cryptroot must have exactly one backing device'
+	backing=$(printf '%s\n' "$status" | sed -n 's/^[[:space:]]*device:[[:space:]]*//p' | trim_line)
+	case "$backing" in
+		/dev/*) ;;
+		*) die 'cryptroot backing device is not a /dev path' ;;
+	esac
+
+	raw_type=$($BLKID -s TYPE -o value "$backing" 2>/dev/null | trim_line) || die 'cannot identify cryptroot backing type'
+	raw_partuuid=$($BLKID -s PARTUUID -o value "$backing" 2>/dev/null | trim_line) || die 'cannot identify cryptroot backing PARTUUID'
+	raw_luks_uuid=$($BLKID -s UUID -o value "$backing" 2>/dev/null | trim_line) || die 'cannot identify cryptroot backing LUKS UUID'
+	raw_partuuid=$(printf '%s' "$raw_partuuid" | tr 'A-F' 'a-f')
+	raw_luks_uuid=$(printf '%s' "$raw_luks_uuid" | tr 'A-F' 'a-f')
+	test "$raw_type" = crypto_LUKS || die 'cryptroot backing is not TYPE=crypto_LUKS'
+	test "$raw_partuuid" = "$EXPECTED_USERDATA_PARTUUID" || die 'cryptroot backing PARTUUID is not USERDATA'
+	test "$raw_luks_uuid" = "$luks_uuid" || die 'cryptroot backing LUKS UUID does not match profile'
+	printf '%s\n' "$root_source"
+	exit 0
+fi
+
+# No encrypted profile means this is the existing plaintext image.  Require
+# the known raw root source as well as its filesystem identity; a different
+# mapper or arbitrary mounted ext4 must never be accepted implicitly.
+test "$root_source" = "$PLAINTEXT_ROOT_DEVICE" || die 'plaintext root source is not the known USERDATA device'
+printf '%s\n' "$root_source"

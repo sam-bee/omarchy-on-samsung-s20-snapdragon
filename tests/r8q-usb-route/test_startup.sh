@@ -17,6 +17,8 @@ make_fixture() {
     root=$1
     mode=$2
     mkdir -p "$root/bin" "$root/etc" "$root/dev" "$root/proc/sys/kernel/random" "$root/sys/module/i2c_qcom_geni/parameters" "$root/sys/class/power_supply" "$root/sys/bus/i2c/devices" "$root/sys/bus/i2c/drivers/simple-mfd-i2c" "$root/usr/lib/modules/$KERNEL/updates/r8q-usb-route" "$root/usr/local/sbin" "$root/usr/local/lib/r8q-usb-route"
+    cp "$PROJECT/rootfs/usr/local/sbin/r8q-root-device" "$root/usr/local/sbin/r8q-root-device"
+    chmod 755 "$root/usr/local/sbin/r8q-root-device"
     printf 'offline gpi module fixture\n' > "$root/usr/lib/modules/$KERNEL/updates/r8q-usb-route/gpi.ko"
     printf 'offline geni module fixture\n' > "$root/usr/lib/modules/$KERNEL/updates/r8q-usb-route/i2c-qcom-geni.ko"
     GPI_SHA=$(sha256sum "$root/usr/lib/modules/$KERNEL/updates/r8q-usb-route/gpi.ko" | cut -d ' ' -f1)
@@ -26,6 +28,22 @@ make_fixture() {
     printf '%s\n' "$MACHINE_ID" > "$root/etc/machine-id"
     : > "$root/proc/modules"
     : > "$root/sys/module/i2c_qcom_geni/parameters/r8q_force_fifo"
+    cat > "$root/bin/findmnt" <<'EOF_FINDMNT'
+#!/bin/sh
+case " $* " in
+    *' -o SOURCE '*) printf '%s\n' /dev/sda36 ;;
+    *' -o FSTYPE '*) printf '%s\n' ext4 ;;
+    *' -o UUID '*) printf '%s\n' 217b9308-40c7-4eb0-90a9-09ed4e233173 ;;
+    *) exit 1 ;;
+esac
+EOF_FINDMNT
+    chmod 755 "$root/bin/findmnt"
+    cat > "$root/bin/stat" <<'EOF_STAT'
+#!/bin/sh
+test "$1" = -c && test "$2" = '%u:%g:%a' || exit 1
+printf '%s\n' 0:0:600
+EOF_STAT
+    chmod 755 "$root/bin/stat"
     case "$mode" in
         preloaded)
             printf 'gpi 1 0 - Live 0x0\ni2c_qcom_geni 1 0 - Live 0x0\n' > "$root/proc/modules"

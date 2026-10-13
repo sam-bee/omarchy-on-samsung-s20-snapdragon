@@ -319,3 +319,39 @@ reviewed runtime changes had not yet been re-embedded; regenerating the cpio
 and relinking produced this accepted payload. Its receipt is
 `kernel02/candidate-manifest.json`. These are build/audit results, not a boot
 or real encrypted-volume test.
+
+## October 13 migration preparation
+
+Native screen locking is complete and accepted on the handset; the earlier
+lock-first discussion above is historical. Encryption remains inactive until
+an explicit successful encrypted-root boot is recorded.
+
+The cold backup is captured through Mu Mass Storage with ext4 journal replay
+disabled. A separate scratch ext4 restore must pass file content, ownership,
+permissions, links and filesystem checks before USERDATA migration. Keep
+these private artifacts out of Git: the root archive contains credentials.
+
+`scripts/prepare-encryption-probe.py` generates a distinct test-only early
+boot image from a supplied production staging tree and tool closure. It
+restores the pinned known-good CACHE EFI/DTB before requesting the public
+word `test`, then tests a disposable RAM LUKS2 volume and ext4 I/O. It never
+references USERDATA or hands off to the real root. The trial EFI hash receipt
+must be generated after the kernel build; embedding its own final image hash
+would be circular. A failure before the rollback needs Mu Mass Storage and
+the retained known-good EFI. This probe does not establish encrypted-root
+handoff or production credential recovery.
+
+The root-device validator accepts the existing `/dev/sda36` ext4 root, or an
+explicitly provisioned `/dev/mapper/cryptroot` whose LUKS2 backing partition
+has the expected USERDATA PARTUUID and matching LUKS UUID. Preserve ext4 UUID
+`217b9308-40c7-4eb0-90a9-09ed4e233173` and label `archroot` when restoring;
+post-root hardware helpers and fstab rely on those identities. Install the
+actual UUID-only `/etc/r8q-encrypted-root.env` as root-owned mode 0600 after
+conversion. The tracked `.env.example` is intentionally not a live profile.
+Update `/etc/r8q-usb-route.env`'s `EXPECTED_HELPER_SHA256` whenever changing
+`r8q-usb-route-ensure.sh`; its existing strict helper binding remains active.
+
+Both production and test init use bounded whole-second waits compatible
+with the minimal BusyBox build. Early touch must be unloaded before normal
+hardware services take over. Disk unlocking uses a separate strong private
+boot credential; the four-digit screen PIN must never become a LUKS keyslot.

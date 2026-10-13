@@ -137,11 +137,15 @@ def main():
                  initroot / 'etc/r8q-encryption-manifest.json', output / 'embedded-initramfs-manifest.json',
                  output / 'kernel-source-manifest.jsonl'):
         files[str(path)] = dict(bytes=path.stat().st_size, sha256=sha(path.read_bytes()))
-    record = dict(kind='r8q-isolated-encrypted-root-boot-candidate', kernel_release='7.1.2-r8q-rtc2',
+    probe = metadata.get('userdata_targeted') is False and metadata.get('root_handoff') is False
+    candidate_kind = ('r8q-test-only-volatile-encryption-boot-probe' if probe
+                      else 'r8q-isolated-encrypted-root-boot-candidate')
+    record = dict(kind=candidate_kind, kernel_release='7.1.2-r8q-rtc2',
                   source=str(source), source_files=count, source_sha256=source_hash,
                   compiler=subprocess.check_output(['clang', '--version'], text=True).splitlines()[0],
                   embedded_files_checked=checked, archive_owners='all UID/GID 0', files=files,
-                  installed=False, boot_tested=False, encrypted_io_tested=False)
+                  installed=False, boot_tested=False, encrypted_io_tested=False,
+                  root_handoff=not probe)
     (output / 'candidate-manifest.json').write_text(json.dumps(record, indent=2) + '\n')
     print(json.dumps(record, indent=2))
 

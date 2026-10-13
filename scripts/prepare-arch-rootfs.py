@@ -35,6 +35,7 @@ USB_ROUTE_WITNESS = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-witness.sh'
 HARDWARE_PREPARE_SERVICE = REPO / 'rootfs/etc/systemd/system/r8q-hardware-prepare.service'
 USB_ROUTE_WRAPPER = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-up.sh'
 USB_ROUTE_HELPER = REPO / 'rootfs/usr/local/sbin/r8q-usb-route-ensure.sh'
+ROOT_DEVICE_HELPER = REPO / 'rootfs/usr/local/sbin/r8q-root-device'
 USB_ROUTE_PROTOCOL = REPO / 'rootfs/usr/local/lib/r8q-usb-route/protocol-binding.env'
 USB_ROUTE_MODPROBE = REPO / 'rootfs/etc/modprobe.d/r8q-usb-route.conf'
 USB_ROUTE_ENV_EXAMPLE = REPO / 'rootfs/etc/r8q-usb-route.env.example'
@@ -425,6 +426,7 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
               'etc/systemd/system/r8q-hardware-prepare.service', 0o644)
     safe_copy(USB_ROUTE_WRAPPER, 'usr/local/sbin/r8q-usb-route-up.sh', 0o755)
     safe_copy(USB_ROUTE_HELPER, 'usr/local/sbin/r8q-usb-route-ensure.sh', 0o755)
+    safe_copy(ROOT_DEVICE_HELPER, 'usr/local/sbin/r8q-root-device', 0o755)
     safe_copy(USB_ROUTE_PROTOCOL,
               'usr/local/lib/r8q-usb-route/protocol-binding.env', 0o644)
     safe_copy(USB_ROUTE_MODPROBE, 'etc/modprobe.d/r8q-usb-route.conf', 0o644)
@@ -462,6 +464,7 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
         ('etc/systemd/system/r8q-hardware-prepare.service', 0o644),
         ('usr/local/sbin/r8q-usb-route-up.sh', 0o755),
         ('usr/local/sbin/r8q-usb-route-ensure.sh', 0o755),
+        ('usr/local/sbin/r8q-root-device', 0o755),
         ('usr/local/lib/r8q-usb-route/protocol-binding.env', 0o644),
         ('etc/modprobe.d/r8q-usb-route.conf', 0o644),
         ('etc/r8q-usb-route.env.example', 0o644),
@@ -496,6 +499,7 @@ def configure_rootfs(archive_sha256: str, archive_members: int) -> dict[str, obj
             'etc/systemd/system/r8q-hardware-prepare.service',
             'usr/local/sbin/r8q-usb-route-up.sh',
             'usr/local/sbin/r8q-usb-route-ensure.sh',
+            'usr/local/sbin/r8q-root-device',
             'usr/local/lib/r8q-usb-route/protocol-binding.env',
             'etc/modprobe.d/r8q-usb-route.conf',
             'etc/r8q-usb-route.env.example',

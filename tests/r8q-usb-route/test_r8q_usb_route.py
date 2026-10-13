@@ -13,6 +13,7 @@ import shutil
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER = REPO_ROOT / "rootfs/usr/local/sbin/r8q-usb-route-ensure.sh"
+ROOT_DEVICE_HELPER = REPO_ROOT / "rootfs/usr/local/sbin/r8q-root-device"
 PROTOCOL = REPO_ROOT / "rootfs/usr/local/lib/r8q-usb-route/protocol-binding.env"
 SOURCE_DIR = REPO_ROOT / "out/unattended-boot-20261009/usb-handoff-review/exact-smg7810-source"
 BOOT_SHA = "e08db773c7231bbeac02493fb07220fe176c20bebbf134470d0980c07f0ee725"
@@ -83,8 +84,28 @@ def make_tree(root: Path) -> tuple[Path, Path, Path, Path, Path, Path]:
         config.write(f"EXPECTED_PROTOCOL_SHA256={hashlib.sha256(PROTOCOL.read_bytes()).hexdigest()}\n")
     protocol_dir.mkdir(parents=True)
     shutil.copy2(PROTOCOL, protocol_dir / "protocol-binding.env")
+    root_helper = root / "usr/local/sbin/r8q-root-device"
+    root_helper.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT_DEVICE_HELPER, root_helper)
+    root_helper.chmod(0o755)
 
     fake_bin.mkdir(parents=True)
+    (fake_bin / "findmnt").write_text(
+        "#!/bin/sh\n"
+        "case \" $* \" in\n"
+        "  *' -o SOURCE '*) printf '%s\\n' /dev/sda36 ;;\n"
+        "  *' -o FSTYPE '*) printf '%s\\n' ext4 ;;\n"
+        "  *' -o UUID '*) printf '%s\\n' 217b9308-40c7-4eb0-90a9-09ed4e233173 ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    (fake_bin / "stat").write_text(
+        "#!/bin/sh\n"
+        "test \"$1\" = -c && test \"$2\" = '%u:%g:%a' || exit 1\n"
+        "printf '%s\\n' 0:0:600\n",
+        encoding="utf-8",
+    )
     (fake_bin / "uname").write_text("#!/bin/sh\nprintf '%s\\n' 7.1.2-r8q-rtc2\n", encoding="utf-8")
     (fake_bin / "blkid").write_text(
         "#!/bin/sh\nprintf '%s\\n' 217b9308-40c7-4eb0-90a9-09ed4e233173\n", encoding="utf-8"
@@ -201,6 +222,9 @@ def run_fixture(root: Path, sysfs: Path, proc: Path, etc: Path, fake_bin: Path, 
             "R8Q_STATE_ROOT": str(root / "state"),
             "R8Q_BOOT_DEVICE": str(boot),
             "R8Q_ROOT_DEVICE": "/dev/fake-root",
+            "R8Q_ROOT_DEVICE_FINDMNT": str(fake_bin / "findmnt"),
+            "R8Q_ROOT_DEVICE_BLKID": str(fake_bin / "blkid"),
+            "R8Q_ROOT_DEVICE_STAT": str(fake_bin / "stat"),
             "R8Q_POLL_LIMIT": "3",
             "R8Q_POLL_SLEEP": "0",
             "R8Q_MODE": mode,

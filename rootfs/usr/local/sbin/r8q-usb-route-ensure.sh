@@ -27,6 +27,7 @@ if test "$OFFLINE" = 1; then
     STATE_ROOT=${R8Q_STATE_ROOT:-/tmp/r8q-usb-route/state}
     BOOT_DEVICE=${R8Q_BOOT_DEVICE:-/dev/sda23}
     ROOT_DEVICE=${R8Q_ROOT_DEVICE:-/dev/sda36}
+    ROOT_DEVICE_HELPER=${R8Q_ROOT_DEVICE_HELPER:-${PROTOCOL_DIR%/usr/local/lib/r8q-usb-route}/usr/local/sbin/r8q-root-device}
     POLL_LIMIT=${R8Q_POLL_LIMIT:-3}
     POLL_SLEEP=${R8Q_POLL_SLEEP:-0}
 else
@@ -36,6 +37,7 @@ else
     STATE_ROOT=/var/lib/r8q-usb-route
     BOOT_DEVICE=/dev/sda23
     ROOT_DEVICE=/dev/sda36
+    ROOT_DEVICE_HELPER=/usr/local/sbin/r8q-root-device
     POLL_LIMIT=100
     POLL_SLEEP=0.05
 fi
@@ -212,6 +214,24 @@ test "$PMIC_ADDRESS:$MUIC_ADDRESS:$UIC_REGISTER:$OPCODE_REGISTER:$END_DATA_REGIS
 test "$READ_OPCODE:$WRITE_OPCODE:$TARGET_ROUTE:$COM_OPEN:$COM_USB_CP" = 0x05:0x06:0x09:0x3f:0xa4 || die "opcode or route binding mismatch"
 test "$ALLOWED_INITIAL_UIC_MASK" = 0x33 || die "initial UIC mask binding mismatch"
 test "$CC_STATUS1_REJECT_MASK" = 0xf6 || die "CC_STATUS1 safety mask binding mismatch"
+
+test -f "$ROOT_DEVICE_HELPER" || die "root-device helper is missing"
+test ! -L "$ROOT_DEVICE_HELPER" || die "root-device helper is a symlink"
+if test "$OFFLINE" = 1; then
+    ROOT_DEVICE=$(R8Q_ROOT_DEVICE_OFFLINE=1 \
+        R8Q_ROOT_DEVICE_ETC_ROOT="$ETC_ROOT" \
+        R8Q_ROOT_DEVICE_PROFILE="${R8Q_ROOT_DEVICE_PROFILE:-$ETC_ROOT/r8q-encrypted-root.env}" \
+        R8Q_ROOT_DEVICE_FINDMNT="${R8Q_ROOT_DEVICE_FINDMNT:-findmnt}" \
+        R8Q_ROOT_DEVICE_BLKID="${R8Q_ROOT_DEVICE_BLKID:-blkid}" \
+        R8Q_ROOT_DEVICE_STAT="${R8Q_ROOT_DEVICE_STAT:-stat}" \
+        "$ROOT_DEVICE_HELPER" | tr -d '\r\n') || die "root-device validation failed"
+else
+    ROOT_DEVICE=$("$ROOT_DEVICE_HELPER" | tr -d '\r\n') || die "root-device validation failed"
+fi
+case "$ROOT_DEVICE" in
+    /dev/*) ;;
+    *) die "root-device helper returned an invalid source" ;;
+esac
 
 command -v cat >/dev/null 2>&1 || die "cat is unavailable"
 command -v date >/dev/null 2>&1 || die "date is unavailable"

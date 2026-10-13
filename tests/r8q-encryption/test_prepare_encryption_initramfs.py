@@ -331,6 +331,9 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         self.assertIn("udevadm", generated)
         self.assertIn("/dev/mapper/$MAPPER", generated)
         self.assertIn("FAIL CLOSED", generated)
+        # The shipped probe BusyBox has integer sleep only (no fancy/fractional
+        # sleep feature), so every generated wait must remain whole seconds.
+        self.assertNotRegex(generated, r"sleep\s+0\.")
         self.assertNotIn("telnetd", generated)
         self.assertNotIn('mount -t ext4 "$ROOT"', generated)
         self.assertNotIn("init.normal", generated)

@@ -21,7 +21,10 @@ SHA256SUM=/usr/bin/sha256sum
 UNAME=/usr/bin/uname
 RANDOM_BOOT_ID=/proc/sys/kernel/random/boot_id
 HELPER_PATH=/usr/local/sbin/r8q-usb-route-ensure.sh
+ROOT_DEVICE_HELPER=/usr/local/sbin/r8q-root-device
 PROTOCOL_PATH=/usr/local/lib/r8q-usb-route/protocol-binding.env
+ROOT_FINDMNT=findmnt
+ROOT_STAT=stat
 
 # Offline fixture path injection is deliberately unavailable in production.
 if test "${R8Q_USB_ROUTE_OFFLINE:-0}" = 1; then
@@ -41,7 +44,10 @@ if test "${R8Q_USB_ROUTE_OFFLINE:-0}" = 1; then
     UNAME=${R8Q_USB_ROUTE_UNAME:-$TEST_ROOT/bin/uname}
     RANDOM_BOOT_ID=$TEST_ROOT/proc/sys/kernel/random/boot_id
     HELPER_PATH=$TEST_ROOT/usr/local/sbin/r8q-usb-route-ensure.sh
+    ROOT_DEVICE_HELPER=${R8Q_USB_ROUTE_ROOT_DEVICE_HELPER:-$TEST_ROOT/usr/local/sbin/r8q-root-device}
     PROTOCOL_PATH=$TEST_ROOT/usr/local/lib/r8q-usb-route/protocol-binding.env
+    ROOT_FINDMNT=${R8Q_USB_ROUTE_FINDMNT:-$TEST_ROOT/bin/findmnt}
+    ROOT_STAT=${R8Q_USB_ROUTE_STAT:-$TEST_ROOT/bin/stat}
 fi
 
 BOOT_ID=
@@ -104,6 +110,23 @@ case "$BOOT_ID" in
 esac
 MACHINE_ID=$(cat "$ETC_ROOT/machine-id" 2>/dev/null | tr -d '\r\n') || die "cannot read machine ID"
 test "$MACHINE_ID" = "$EXPECTED_MACHINE_ID" || die "unexpected machine ID"
+test -f "$ROOT_DEVICE_HELPER" || die "root-device helper is missing"
+test ! -L "$ROOT_DEVICE_HELPER" || die "root-device helper is a symlink"
+if test "${R8Q_USB_ROUTE_OFFLINE:-0}" = 1; then
+    ROOT_DEVICE=$(R8Q_ROOT_DEVICE_OFFLINE=1 \
+        R8Q_ROOT_DEVICE_ETC_ROOT="$ETC_ROOT" \
+        R8Q_ROOT_DEVICE_PROFILE="${R8Q_USB_ROUTE_ROOT_PROFILE:-$ETC_ROOT/r8q-encrypted-root.env}" \
+        R8Q_ROOT_DEVICE_FINDMNT="$ROOT_FINDMNT" \
+        R8Q_ROOT_DEVICE_BLKID="$BLKID" \
+        R8Q_ROOT_DEVICE_STAT="$ROOT_STAT" \
+        "$ROOT_DEVICE_HELPER" | tr -d '\r\n') || die "root-device validation failed"
+else
+    ROOT_DEVICE=$("$ROOT_DEVICE_HELPER" | tr -d '\r\n') || die "root-device validation failed"
+fi
+case "$ROOT_DEVICE" in
+    /dev/*) ;;
+    *) die "root-device helper returned an invalid source" ;;
+esac
 ROOT_UUID=$("$BLKID" -s UUID -o value "$ROOT_DEVICE" 2>/dev/null | tr -d '\r\n') || die "root UUID lookup failed"
 test "$ROOT_UUID" = "$EXPECTED_ROOT_UUID" || die "unexpected root UUID"
 if test "${R8Q_USB_ROUTE_OFFLINE:-0}" = 1; then

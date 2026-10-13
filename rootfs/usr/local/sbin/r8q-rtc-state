@@ -16,7 +16,7 @@ umask 077
 PATH=/usr/bin:/usr/sbin:/bin:/sbin
 export PATH
 
-ROOT_DEVICE=/dev/sda36
+ROOT_DEVICE_HELPER=/usr/local/sbin/r8q-root-device
 ROOT_UUID=217b9308-40c7-4eb0-90a9-09ed4e233173
 EXPECTED_HOSTNAME=r8q
 EXPECTED_MODEL='Samsung Galaxy S20 FE'
@@ -75,6 +75,13 @@ acquire_lock()
 
 require_identity()
 {
+	[ -f "$ROOT_DEVICE_HELPER" ] || die 'root-device helper is missing'
+	[ ! -L "$ROOT_DEVICE_HELPER" ] || die 'root-device helper is a symlink'
+	ROOT_DEVICE=$($ROOT_DEVICE_HELPER 2>/dev/null) || die 'root-device validation failed'
+	case "$ROOT_DEVICE" in
+		/dev/*) ;;
+		*) die 'root-device helper returned an invalid source' ;;
+	esac
 	root_source=$(findmnt -rn -o SOURCE / 2>/dev/null || true)
 	[ "$root_source" = "$ROOT_DEVICE" ] || die "root source is not $ROOT_DEVICE"
 	root_uuid=$(blkid -s UUID -o value "$ROOT_DEVICE" 2>/dev/null || true)

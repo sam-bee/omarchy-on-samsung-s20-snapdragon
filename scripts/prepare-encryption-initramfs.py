@@ -355,8 +355,8 @@ terminate_pid() {{
     kill "$pid" 2>/dev/null || :
     TP_TRIES=0
     while kill -0 "$pid" 2>/dev/null; do
-        [ "$TP_TRIES" -lt 20 ] || break
-        TP_TRIES=$((TP_TRIES + 1)); sleep 0.1
+        [ "$TP_TRIES" -lt 2 ] || break
+        TP_TRIES=$((TP_TRIES + 1)); sleep 1
     done
     kill -9 "$pid" 2>/dev/null || :
     wait "$pid" 2>/dev/null || :
@@ -428,10 +428,10 @@ kill -0 "$UDEVD_PID" 2>/dev/null || fail_closed udevd-start
 
 wait_for_udev() {{
     i=0
-    while [ "$i" -lt 50 ]; do
+    while [ "$i" -lt 5 ]; do
         kill -0 "$UDEVD_PID" 2>/dev/null || return 1
         [ -S /run/udev/control ] && return 0
-        i=$((i + 1)); sleep 0.1
+        i=$((i + 1)); sleep 1
     done
     return 1
 }}
@@ -455,9 +455,9 @@ has_ready_event() {{
 
 wait_for_ready() {{
     path=$1; i=0
-    while [ "$i" -lt 100 ]; do
+    while [ "$i" -lt 10 ]; do
         has_ready_event "$path" && return 0
-        i=$((i + 1)); sleep 0.1
+        i=$((i + 1)); sleep 1
     done
     return 1
 }}
@@ -483,7 +483,7 @@ fi
 
 findpart() {{
     for u in /sys/class/block/*/uevent; do
-        if grep -qi "^PARTNAME=$1\\$" "$u" 2>/dev/null; then
+        if grep -qi "^PARTNAME=$1$" "$u" 2>/dev/null; then
             echo "/dev/$($BB basename "$($BB dirname "$u")")"; return 0
         fi
     done
