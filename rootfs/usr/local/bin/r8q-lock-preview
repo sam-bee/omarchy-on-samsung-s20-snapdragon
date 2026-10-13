@@ -1,0 +1,11 @@
+#!/bin/sh
+# A bounded keypad demonstration in the existing alarm desktop session.
+# It does not lock the compositor or authenticate a credential.
+set -eu
+test "$(id -un)" = alarm
+: "${XDG_RUNTIME_DIR:?run this inside the phone desktop session}"
+: "${WAYLAND_DISPLAY:?the phone Wayland socket is required}"
+preview=/usr/share/r8q/omarchy/lock/Preview.qml
+test -r "$preview"
+exec timeout --signal=TERM --kill-after=5 95 \
+    quickshell --no-duplicate --path "$preview"

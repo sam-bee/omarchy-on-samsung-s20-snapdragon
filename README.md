@@ -25,3 +25,7 @@ For setup, read [prerequisites](PREREQUISITES.md) and
 [installation](INSTALLATION.md); installation wipes userdata. Details of our
 additions are in the [desktop](docs/r8q-desktop.md),
 [audio](docs/r8q-audio.md) and [charging](docs/r8q-charging.md) notes.
+
+A [touch-lock keypad preview](docs/r8q-lock.md) and
+[optional encryption prerequisites](docs/r8q-encryption.md) are prepared for
+further testing; automatic locking and encrypted-root boot are not enabled.

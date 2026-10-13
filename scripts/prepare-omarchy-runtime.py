@@ -71,6 +71,7 @@ RUNTIME_OVERLAY_PREFIXES = {
     'plugin/r8q.launcher': 'phone-plugin/r8q.launcher',
     'plugin/r8q.battery': 'phone-plugin/r8q.battery',
 }
+EXTRA_ROOTFS_FILES = ('usr/local/bin/r8q-lock-preview',)
 ABSOLUTE_SYMLINKS = {
     'usr/bin/omarchy-launch-shell': '/usr/share/omarchy/bin/omarchy-launch-shell',
     'usr/bin/omarchy-shell': '/usr/share/omarchy/bin/omarchy-shell',
@@ -311,6 +312,12 @@ def copy_overlay(output: Path) -> list[dict[str, object]]:
         data = source.read_bytes()
         files.append(write_regular(data, target, source.stat().st_mode))
     require(files, 'tracked phone overlay is empty')
+    # The standalone timed preview is additive and does not enable a lock.
+    for relative in EXTRA_ROOTFS_FILES:
+        source = REPO / 'rootfs' / relative
+        ensure_regular_overlay(source, relative)
+        files.append(write_regular(source.read_bytes(), output / 'rootfs' / relative,
+                                   source.stat().st_mode))
     return files
 
 
