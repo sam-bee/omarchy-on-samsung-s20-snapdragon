@@ -40,6 +40,8 @@ starts the shell, waits for secure coverage, then lifts the curtain and starts
 the keyboard/idle client. Failure retains the curtain for authenticated SSH
 recovery. Fresh shell instances also lock once PAM loads, preserving upstream
 orphan-lock recovery. No unlock IPC method exists; PAM success releases it.
+The phone enables Hyprland's allow_session_lock_restore, as pinned Omarchy
+does, so a replacement shell can recover the compositor's orphan-lock failsafe.
 
 ## Administration and provisioning
 
@@ -72,8 +74,11 @@ two failures and cleaned its separate policy/tally. It never read or tried
 the real PIN.
 
 Initial native activation confirmed requested=true, sessionLocked=true and
-secure=true. Human wrong/right PIN, side-button wake, idle and shell/compositor
-restart acceptance are recorded in the project log and ignored
+secure=true. The operator confirmed wrong-PIN rejection and correct-PIN unlock;
+IPC confirmed the lock released and the failure tally reset. Desktop restart
+started securely locked. A SIGKILL test confirmed the compositor retained its
+lock and the supervisor restored a working native lock client automatically.
+Side-button and idle acceptance are recorded in the project log and ignored
 out/screen-lock-20261013 receipts as they complete.
 
 References: [WlSessionLock](https://quickshell.org/docs/v0.3.1/types/Quickshell.Wayland/WlSessionLock/),

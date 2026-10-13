@@ -43,6 +43,9 @@ hl.config({
     border_size = 1,
   },
   misc = {
+    -- Let the supervised shell replace a crashed lock client while the
+    -- compositor continues to protect the session with its failsafe.
+    allow_session_lock_restore = true,
     -- Omarchy renders the selected image; use Tokyo Night's solid color
     -- while the wallpaper is loading, with no compositor default image.
     disable_hyprland_logo = true,
