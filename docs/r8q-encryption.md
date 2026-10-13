@@ -2,10 +2,11 @@
 
 Date: 2026-10-13
 
-This document records an optional kernel-side preparation only. The fragment
+This document records the optional kernel prerequisites and isolated boot
+candidate tooling. The fragment
 [`config/r8q_encryption.config`](../config/r8q_encryption.config)
-is not wired into the default build and has not been built, flashed, or tested
-on the phone. It is insufficient by itself to encrypt or unlock a root.
+is not wired into the default build. It is insufficient by itself to encrypt
+or unlock a root. The later candidate build does not install or encrypt anything.
 
 ## Live and repository baseline
 
@@ -93,7 +94,8 @@ The two initramfs designs remain open until the boot integration is proven:
   arrangement really embeds or loads that image. Merely enabling the staged
   hook cannot replace the custom embedded image.
 
-Neither design is selected by this fragment or document. The first candidate
+The fragment itself selects neither design. The isolated October 13 candidate
+uses the custom BusyBox path described below. The first candidate
 must have one owner for device discovery, passphrase prompting, mapping,
 filesystem checks, and root handoff; do not combine both prompt systems.
 
@@ -204,7 +206,8 @@ required mapper/cipher dependencies resolved to built-ins; UFS, ext4 and
 simpledrm remained built in. Kconfig additionally promoted CBC, AUTHENC,
 ESSIV, the MD5 library and the existing PNFS_BLOCK feature because of the
 mapper dependency. CC_CAN_LINK appeared from compiler capability detection.
-No kernel image was built or installed, and default build wiring is unchanged.
+At that preparation checkpoint no kernel image was built or installed.
+Default build wiring remains unchanged.
 
 On the phone, a disposable 32 MiB file in `/run` tmpfs was formatted as LUKS2
 with AES-XTS metadata and Argon2id. Correct-key testing passed and a wrong
@@ -218,3 +221,101 @@ benchmark interface, so no data-path throughput result is claimed. The live
 kernel still lacks dm-crypt. Keyslot tests prove the existing userspace can
 create/verify LUKS2 credentials; they do not prove encrypted-root I/O, early
 touch, charging at the prompt, or successful boot.
+
+## Isolated boot candidate and backup
+
+The operator subsequently authorized a backup and unattended build. The
+private artifacts are under `out/encryption-build-20261013/`; they are ignored
+by Git and must not be committed. `backup/manifest.json` and `backup/SHA256SUMS`
+cover the raw BOOT, RECOVERY, CACHE, DTBO and both VBMETA images, the captured
+EFI files and GPT metadata, and the root archive verification receipts.
+Each unmounted raw partition was hashed before and after streaming, with a
+matching local hash and byte count. CACHE passed `fsck.fat -n`. Primary and
+backup GPT headers and partition-entry arrays passed CRC checks for the four
+exported UFS logical units.
+
+`backup/rootfs.tar.zst` is a **live file archive**, not an offline USERDATA
+image or atomic snapshot. It includes numeric ownership, modes, hardlinks,
+sparse files, ACLs and xattrs; it excludes the contents of proc, sys, dev, run
+and tmp. Zstd integrity and every regular-file payload were checked. The only
+tar warnings were skipped sockets and changing metadata for the excluded sys
+directory. Offline extraction, filesystem checks and bootable restore
+acceptance remain required before storage conversion. The backup contains
+private data and must stay access-controlled. It does not contain a full
+stock SUPER image or a fresh PIT capture.
+
+The custom candidate has a separate static BusyBox 1.38.0 with the required
+module/FIFO/process applets and module-parameter parsing. Networking applets,
+including telnetd, are disabled. Its full optional configuration is in
+`config/r8q-encryption-busybox.config`; the normal boot BusyBox is unchanged.
+Unl0kr 3.3.0 was built natively on the phone from the pinned BuffyBox mirror
+commit `7e481313a01edf02f283e57f70cb94323ae7be53` and LVGL commit
+`7f07a129e8d77f4984fff8e623fd5be18ff42e74`. Phone build packages came from
+the signed ARM repositories after the backup. No laptop package was installed.
+
+`scripts/prepare-encryption-initramfs.py` accepts an explicit ARM runtime
+staging tree, cryptsetup, unl0kr, udevadm, dmsetup and the exact four touch
+modules. It checks ELF architecture, interpreter/library closure and module
+vermagic, then manifests every added runtime asset. Supply the input rules,
+hardware database, libinput quirks, XKB and libwacom data, and the optional
+`config/r8q-unl0kr.conf` through repeatable `--extra-path` arguments. A complete
+ELF closure is necessary but does not prove runtime data files or BusyBox
+applets; execute the resulting tools and applet checks in an isolated ARM
+chroot before building. The ordinary raw-root init is never embedded as a
+fallback.
+
+The generated init mounts a private `/run`, starts minimal udev, loads GPI
+then GENI with FIFO forced, and selects the responding touch controller.
+It requires a LUKS2 header, pipes unl0kr output directly to cryptsetup with
+`-n` forced to avoid an extra newline, and permits three timed attempts.
+It explicitly creates mapper nodes and mounts only `/dev/mapper/cryptroot`.
+After unlocking it stops udev and unloads the four early touch modules in
+reverse order, so the current root startup helpers retain their existing
+ownership checks. This teardown and subsequent reload need a cold-boot test.
+Failure never mounts plaintext USERDATA or starts a network/debug shell.
+Pre-handoff failure handlers clean tracked mounts and attempt mapper close.
+The final BusyBox `switch_root` must replace PID 1 with `exec`; calling it in
+a child would fail its PID check. After that boundary, a switch-root/systemd
+failure reaches kernel PID-1 panic/reset rather than returning to the shell.
+Do not claim that this late failure explicitly closes the mapper before reset.
+
+`scripts/build-encryption-candidate.sh` accepts the existing patched source,
+captured live config, prepared initramfs, captured active DTB and a new output
+directory under `out/`. It pins the accepted baseline config, compiler and
+DTB, rejects source/initramfs output overlap and unrelated config changes,
+and builds only an Image. The kernel release remains `7.1.2-r8q-rtc2` to
+match the exact existing touch bundle; `MODVERSIONS` is disabled. The payload
+contains that EFI Image and the unchanged active DTB. It has no flash, reboot,
+formatting, deployment or real-credential step. It intentionally cannot boot
+the phone's current plaintext USERDATA.
+
+`scripts/validate-encryption-candidate.py` checks the produced ARM64 EFI
+header and confirms the generated compressed initramfs is actually embedded
+at the kernel's initramfs symbol. It audits the complete cpio path/type set,
+file hashes, modes, root ownership, symlinks and explicit device numbers,
+and compares kernel source receipts before and after the build. The candidate
+manifest states separately that installation, cold boot and encrypted I/O
+have not been tested. Shell protocol fixtures test retries, UI failure,
+timeout, mapper creation, cleanup and rejection of plaintext fallback.
+
+The ARM chroot checks exercise the collected binaries and a synthetic RAM
+LUKS keyslot. They do not run PID 1, start a second live udev daemon, acquire
+the live display, load/unload phone hardware, or expose real block devices.
+Before deployment, prove direct DRM rendering and touch orientation, the
+mapper's encrypted read/write path, module handoff, charger/battery behavior,
+wrong/empty/no-input failure, and offline restore on a disposable boot/root
+test. Then choose the private boot passphrase and perform the actual root
+migration. Routine screen locking remains the separate PAM/session-lock
+work described in `docs/r8q-lock.md`.
+
+The final local payload is
+`out/encryption-build-20261013/kernel02/payload/BOOTAA64.EFI` (67,484,160
+bytes, SHA-256
+`6e6854c77eb124bb588c327c22b424d8178922164dcee25af48588e855186d9e`)
+with the captured `R8Q-RTC.DTB`. The final embedded audit passed for 1,240
+staged files, the full cpio metadata/device allowlist and 98,638 unchanged
+kernel source files/symlinks. The first compiled image was rejected because
+reviewed runtime changes had not yet been re-embedded; regenerating the cpio
+and relinking produced this accepted payload. Its receipt is
+`kernel02/candidate-manifest.json`. These are build/audit results, not a boot
+or real encrypted-volume test.
