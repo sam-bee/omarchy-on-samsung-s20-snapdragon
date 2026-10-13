@@ -78,8 +78,14 @@ secure=true. The operator confirmed wrong-PIN rejection and correct-PIN unlock;
 IPC confirmed the lock released and the failure tally reset. Desktop restart
 started securely locked. A SIGKILL test confirmed the compositor retained its
 lock and the supervisor restored a working native lock client automatically.
-Side-button and idle acceptance are recorded in the project log and ignored
-out/screen-lock-20261013 receipts as they complete.
+The operator also confirmed physical side-button off, wake and PIN unlock.
+An untouched idle observation remained unlocked at 291.7 seconds, then
+confirmed secure native locking at 300.821 seconds after unlock and DSI-1
+DPMS off. The sampler read only IPC/monitor state and sent no input or wake.
+Final acceptance and transport receipts are in the project log and ignored
+out/screen-lock-20261013 files. The configuration audit found only the 14
+expected changed paths across 296 prior protected entries; the new 294-path
+baseline retains the historical receipts and excludes credentials.
 
 References: [WlSessionLock](https://quickshell.org/docs/v0.3.1/types/Quickshell.Wayland/WlSessionLock/),
 [PamContext](https://quickshell.org/docs/v0.3.1/types/Quickshell.Services.Pam/PamContext/),
