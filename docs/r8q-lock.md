@@ -1,66 +1,81 @@
-# Phone lock preparation
+# Phone screen locking
 
-The phone-oriented [LockView](../rootfs/usr/share/r8q/omarchy/lock/LockView.qml)
-and [Keypad](../rootfs/usr/share/r8q/omarchy/lock/Keypad.qml) are presentation
-components compatible with the pinned Omarchy c668 lock service. That service
-owns PAM authentication and the native Wayland session lock. These components
-do not implement either security primitive themselves.
+The phone uses Quickshell's native Wayland session lock. The phone-owned
+Service, LockView and numeric Keypad replace the pinned Omarchy plugin's
+canonical files; the runtime preparer retains upstream files as provenance.
+Service.qml derives from Omarchy c668141e and carries the adjacent MIT LICENSE.
 
-The current deliverable is a safe preview, not an activated screen lock. The
-phone's existing five-minute DPMS policy, Side/Power toggle, desktop startup
-and recovery access remain unchanged. Omarchy's lock plugin remains disabled,
-and no lock PAM file or user credential is provisioned by this preparation.
+## Authentication
 
-## Preview
+The operator selected a four-digit PIN and entered it privately on the phone.
+The service accepts 4–12 digits and authenticates the alarm account through
+/etc/pam.d/r8q-lock. The PIN is the account's local Unix password, separate from
+any later LUKS passphrase. No credential is stored in QML, JSON, scripts, logs
+or Git. Input is cleared before submission; the pending secret is cleared
+when passed to a hidden PAM prompt. Unsupported prompts and a 15-second
+check timeout fail without releasing the lock. Fingerprint is disabled.
 
-The [preview](../rootfs/usr/share/r8q/omarchy/lock/Preview.qml) displays the
-same keypad in an ordinary overlay. It clearly labels itself, discards
-submitted text, offers a Close button, and exits after 90 seconds. The
-[helper](../rootfs/usr/local/bin/r8q-lock-preview) adds an independent process
-timeout. Run `r8q-lock-preview` as `alarm` from the existing phone desktop
-environment; a remote launch must inherit that session's Wayland and D-Bus
-environment. Do not type an actual personal credential into the preview.
+The dedicated PAM stack has no nullok. Five failures within five minutes
+impose a 30-second pause. Its tally is separate under /run/r8q-lock-faillock.
+The tally is owned by alarm with group root. PAM can change mode 0600 to 0660;
+group root restricts that extra access to administrators.
 
-Numeric input is handled inside the surface, with large keys, clear,
-backspace and explicit submit. An explicit field tap supports text entry;
-physical keyboard input is also supported if a working keyboard path exists.
-Keypad actions request hiding the input method instead of repeatedly focusing
-the field. This request does not prove how Squeekboard behaves on a native
-session-lock surface. Shorter displays can scroll the keypad; buttons expose
-accessible names and keyboard activation. Long-password dot fitting preserves
-the full input value.
+The built-in keypad supports digits, backspace, Clear and Unlock without
+Squeekboard. Physical keyboard entry works after focusing the masked field.
+The view scrolls on short displays and supplies accessible controls. The
+90-second r8q-lock-preview remains a labelled, unauthenticated test overlay.
 
-The rootfs overlay includes these files as provenance/staged assets. The
-runtime preparer does not replace the upstream `shell/plugins/lock/LockView`
-or enable the lock. Future integration must explicitly stage both `LockView`
-and `Keypad` beside the upstream lock service in a reviewed candidate.
+## Display policy
 
-## Checks completed on 2026-10-13
+r8q-screen-lock is a credential-free alarm-session helper. It waits for
+requested, sessionLocked and secure; secure is the compositor acknowledgement.
+The blank action requests and confirms a lock before disabling DSI-1 DPMS.
+blank-confirmed refuses an unconfirmed lock. power locks/blanks an awake
+screen or wakes a protected one. wake never releases the session lock.
+Idle uses blank at five minutes; the lock view blanks after one minute
+without interaction. Input and authentication keep the lock view awake.
 
-The source view's synthetic input tests passed on the phone's Qt 6.11.2
-runtime. A separate Quickshell 0.3.1 overlay rendered successfully on DSI-1 at
-1080x2400, scale 2. The main Hyprland and Omarchy processes were preserved,
-and the prior DPMS state was restored after capture. These checks establish
-input logic and rendering only; human touch acceptance is pending.
+Startup disables DPMS before launching ordinary clients. The startup helper
+starts the shell, waits for secure coverage, then lifts the curtain and starts
+the keyboard/idle client. Failure retains the curtain for authenticated SSH
+recovery. Fresh shell instances also lock once PAM loads, preserving upstream
+orphan-lock recovery. No unlock IPC method exists; PAM success releases it.
 
-See [the test instructions](../tests/r8q-lock/README.md) and
-[encryption preparation](r8q-encryption.md).
+## Administration and provisioning
 
-## Gates before enabling a real lock
+Root console autologin is removed. The live root password is locked. SSH uses
+public keys only, with password and keyboard-interactive login disabled. A
+fresh pinned USB key connection passed after root password locking. Authorized
+administrators can still manage the phone while the screen is locked.
 
-1. Confirm finger taps, backspace, clear, submit and scrolling on the phone.
-2. Choose and privately set the session credential. Provision a narrow PAM
-   policy with a non-empty credential, retry limits and verified success/error
-   behavior. No plaintext PIN belongs in QML or JSON.
-3. Adapt upstream wake/blank helpers to the existing phone DPMS policy. Wait
-   for the compositor-confirmed secure lock state before blanking. Preserve
-   Side/Power wake without permitting it to unlock the session.
-4. Start locked after every compositor/service restart, and prove there is no
-   exposed desktop during startup, failed authentication or lock-client crash.
-5. Audit root tty autologin, USB SSH passwords, VT shortcuts and debug recovery
-   paths. Preserve only intentional authenticated administration/recovery.
+Provision the private alarm PIN, key-only recovery and locked root password
+before starting this profile on a fresh image. The preparer never creates or
+copies a credential. Check sshd -T: OpenSSH's first obtained value wins; a
+later drop-in cannot override an earlier unsafe explicit setting. The live
+phone's first-position block was validated before reload.
 
-The upstream service permits password entry while fingerprint authentication
-is armed. Fingerprint support is unproven on this port; enabling it later needs
-its own driver/authentication review. Do not change that upstream concurrency
-policy by treating a continuously armed fingerprint listener as an input lock.
+Run r8q-screen-lock status as alarm with the running desktop's Wayland,
+Hyprland and D-Bus environment. Use authenticated USB SSH for failures. Ending
+the lock client is not an unlock method: the compositor retains its failsafe.
+
+This protects the session. USERDATA remains plaintext until the separate
+encryption migration. The unlocked bootloader/recovery path remains a
+physical-access boundary, and session keys remain in memory.
+
+## Validation
+
+Actual ARM Qt 6.11.2/Quickshell 0.3.1 keypad tests report nine passes. The final
+service passes Qt's formatter/parser. Three helper tests reject optimistic
+lock requests and prevent blanking after failed confirmation. An isolated PAM
+probe rejected empty and nonnumeric synthetic credentials, recorded exactly
+two failures and cleaned its separate policy/tally. It never read or tried
+the real PIN.
+
+Initial native activation confirmed requested=true, sessionLocked=true and
+secure=true. Human wrong/right PIN, side-button wake, idle and shell/compositor
+restart acceptance are recorded in the project log and ignored
+out/screen-lock-20261013 receipts as they complete.
+
+References: [WlSessionLock](https://quickshell.org/docs/v0.3.1/types/Quickshell.Wayland/WlSessionLock/),
+[PamContext](https://quickshell.org/docs/v0.3.1/types/Quickshell.Services.Pam/PamContext/),
+and [Linux-PAM faillock](https://github.com/linux-pam/linux-pam/blob/master/modules/pam_faillock/pam_faillock.8.xml).

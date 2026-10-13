@@ -36,6 +36,11 @@ SOURCE_FILES = (
     'config/omarchy/shell.json',
     'bin/omarchy-launch-shell',
     'bin/omarchy-shell',
+    # The lock service uses this small upstream helper to distinguish a
+    # compositor-held session lock from an unlocked/indeterminate monitor.
+    # It is also copied to /usr/local/bin below for callers outside the
+    # Omarchy launcher environment.
+    'bin/omarchy-hyprland-session-locked',
     # The audio panel invokes these helpers through Quickshell Process and
     # execDetached.  Its sink-availability probe calls audio-tuning only to
     # detect an existing tuning; no tuning payload or service is staged.
@@ -66,12 +71,41 @@ RUNTIME_OVERLAY_FILES = {
     'phone-session.env': 'phone-session.env',
     'phone-shell.json': 'config/omarchy/shell.json',
     'omarchy-runtime.packages': 'config/omarchy/omarchy-runtime.packages',
+    # These files replace the pinned lock view at its canonical plugin
+    # path.  The upstream Service.qml and LockView.qml remain staged below
+    # their own provenance directory rather than colliding with write_regular.
+    'lock/Keypad.qml': 'shell/plugins/lock/Keypad.qml',
+    'lock/LICENSE': 'shell/plugins/lock/LICENSE',
+    'lock/LockView.qml': 'shell/plugins/lock/LockView.qml',
+    'lock/Service.qml': 'shell/plugins/lock/Service.qml',
 }
 RUNTIME_OVERLAY_PREFIXES = {
     'plugin/r8q.launcher': 'phone-plugin/r8q.launcher',
     'plugin/r8q.battery': 'phone-plugin/r8q.battery',
 }
-EXTRA_ROOTFS_FILES = ('usr/local/bin/r8q-lock-preview',)
+EXTRA_ROOTFS_FILES = (
+    'etc/pam.d/r8q-lock',
+    'etc/ssh/sshd_config.d/10-r8q-screen-lock.conf',
+    'etc/tmpfiles.d/r8q-lock.conf',
+    'usr/local/bin/r8q-lock-preview',
+    'usr/local/bin/r8q-screen-lock',
+)
+# The source helper is selected from the verified archive, then staged at the
+# phone's stable /usr/local/bin path.  Keeping this map separate from the
+# tracked EXTRA_ROOTFS_FILES prevents a locally copied helper from becoming
+# the source of the runtime binary.
+SOURCE_ROOTFS_FILES = {
+    'bin/omarchy-hyprland-session-locked':
+        'usr/local/bin/omarchy-hyprland-session-locked',
+}
+# The source lock files are still retained for review, but cannot be written
+# to their live plugin paths because the phone overlay owns those paths.
+SOURCE_LOCK_PROVENANCE = {
+    'shell/plugins/lock/LockView.qml':
+        'shell/plugins/lock/upstream/LockView.qml',
+    'shell/plugins/lock/Service.qml':
+        'shell/plugins/lock/upstream/Service.qml',
+}
 ABSOLUTE_SYMLINKS = {
     'usr/bin/omarchy-launch-shell': '/usr/share/omarchy/bin/omarchy-launch-shell',
     'usr/bin/omarchy-shell': '/usr/share/omarchy/bin/omarchy-shell',
@@ -242,12 +276,14 @@ def copy_source_files(archive: Path, top: str, selected: dict[str, tarfile.TarIn
             extracted = stream.extractfile(member)
             require(extracted is not None, f'cannot read selected archive file: {relative}')
             data = extracted.read()
-            # Preserve the stock config before placing the reviewed phone
-            # config at the canonical default path.  This is the only source
-            # file whose staged target is intentionally renamed.
-            target_relative = (
+            # Preserve the stock config and lock implementation before placing
+            # reviewed phone replacements at their canonical paths.  These
+            # source-only targets are intentionally separate so write_regular
+            # remains fail-closed on every staged path.
+            target_relative = SOURCE_LOCK_PROVENANCE.get(
+                relative,
                 'config/omarchy/upstream-shell.json'
-                if relative == 'config/omarchy/shell.json' else relative
+                if relative == 'config/omarchy/shell.json' else relative,
             )
             target = output / 'rootfs' / 'usr' / 'share' / 'omarchy' / target_relative
             # All explicitly selected bin helpers are executable, regardless
@@ -255,6 +291,18 @@ def copy_source_files(archive: Path, top: str, selected: dict[str, tarfile.TarIn
             # staged as data files.
             mode = 0o755 if relative.startswith('bin/') else 0o644
             files.append(write_regular(data, target, mode))
+
+        # This helper is selected from the same verified archive as the
+        # /usr/share/omarchy/bin copy above.  Do not read a tracked or
+        # generated rootfs duplicate for the executable used by the phone.
+        for relative, target_relative in sorted(SOURCE_ROOTFS_FILES.items()):
+            member = selected.get(relative)
+            require(member is not None, f'source archive is missing required file: {relative}')
+            extracted = stream.extractfile(member)
+            require(extracted is not None, f'cannot read selected archive file: {relative}')
+            data = extracted.read()
+            target = output / 'rootfs' / target_relative
+            files.append(write_regular(data, target, 0o755))
     return files
 
 
@@ -312,7 +360,8 @@ def copy_overlay(output: Path) -> list[dict[str, object]]:
         data = source.read_bytes()
         files.append(write_regular(data, target, source.stat().st_mode))
     require(files, 'tracked phone overlay is empty')
-    # The standalone timed preview is additive and does not enable a lock.
+    # Rootfs helpers and policy are explicit additive assets; the phone shell
+    # configuration controls whether the native lock service is enabled.
     for relative in EXTRA_ROOTFS_FILES:
         source = REPO / 'rootfs' / relative
         ensure_regular_overlay(source, relative)
@@ -373,7 +422,16 @@ def prepare(archive_arg: str, expected_sha256: str, output_arg: str) -> dict[str
             'source': '/usr/share/omarchy/config/omarchy/shell.json',
             'target': '/usr/share/omarchy/config/omarchy/upstream-shell.json',
             'reason': 'retain upstream default beside the reviewed phone default',
-        }],
+        }, *[{
+            'source': '/usr/share/omarchy/' + source,
+            'target': '/usr/share/omarchy/' + target,
+            'reason': 'retain upstream lock implementation beside the phone replacement',
+        } for source, target in sorted(SOURCE_LOCK_PROVENANCE.items())]],
+        'source_rootfs_copies': [{
+            'source': '/usr/share/omarchy/' + source,
+            'target': '/' + target,
+            'reason': 'stage the verified source helper at the phone runtime path',
+        } for source, target in sorted(SOURCE_ROOTFS_FILES.items())],
         'phone_runtime_transformations': runtime_transformations,
         'absolute_usr_bin_symlinks': symlinks,
         'archive_content_executed': False,

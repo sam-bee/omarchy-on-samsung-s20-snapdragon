@@ -37,7 +37,7 @@ Item {
                 focusPolicy: Qt.TabFocus
                 Accessible.role: Accessible.Button
                 Accessible.name: label === "⌫" ? "Backspace" : label
-                Accessible.description: label === "Clear" ? "Clear entered password" : label === "⌫" ? "Delete the last character" : "Enter digit " + label
+                Accessible.description: label === "Clear" ? "Clear entered PIN" : label === "⌫" ? "Delete the last character" : "Enter digit " + label
 
                 contentItem: Text {
                     text: keyButton.label

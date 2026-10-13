@@ -29,7 +29,7 @@ test -c /dev/dri/by-path/platform-3d00000.gpu-render
 test -S /run/seatd.sock
 for program in dbus-run-session start-hyprland Hyprland squeekboard ldd pgrep \
     gdbus gsettings foot quickshell omarchy-launch-shell inotifywait \
-    dbus-update-activation-environment hypridle; do
+    dbus-update-activation-environment hypridle r8q-screen-lock; do
     command -v "$program" >/dev/null
 done
 test -r /usr/share/r8q/omarchy/phone-hypridle.conf

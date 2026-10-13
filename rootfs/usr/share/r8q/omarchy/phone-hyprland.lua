@@ -3,7 +3,7 @@
 -- This deliberately stays independent of Omarchy's full default/hypr tree.
 -- It preserves the already validated phone output, touch mapping and
 -- compositor suspend policy while starting Quickshell, the on-screen keyboard
--- and a display-only idle timer.
+-- and native locking before display blanking.
 
 local omarchy_path = os.getenv("OMARCHY_PATH") or "/usr/share/omarchy"
 local inherited_path = os.getenv("PATH") or "/usr/local/bin:/usr/bin"
@@ -72,7 +72,7 @@ dofile((os.getenv("HOME") or "/home/alarm") .. "/.local/state/omarchy/current/th
 -- Release-only, non-repeating handling gives one toggle per short press.
 hl.bind("XF86PowerOff", function()
   hl.timer(function()
-    hl.dispatch(hl.dsp.dpms({ monitor = "DSI-1", action = "toggle" }))
+    hl.exec_cmd("/usr/local/bin/r8q-screen-lock power")
   end, { timeout = 200, type = "oneshot" })
 end, {
   release = true,
@@ -87,12 +87,10 @@ hl.on("hyprland.start", function()
   -- service has no user-manager bus in its private XDG_RUNTIME_DIR.
   hl.exec_cmd("dbus-update-activation-environment --all")
 
-  -- This helper is separately reviewed by the primary agent. It enables and
-  -- starts Squeekboard for alarm, then explicitly requests visibility. Do not
-  -- replace it with Omarchy's idle/power/lock startup.
-  hl.exec_cmd("/usr/local/bin/r8q-squeekboard")
-  hl.exec_cmd("omarchy-launch-shell")
-  hl.exec_cmd("hypridle -c /usr/share/r8q/omarchy/phone-hypridle.conf")
+  -- Keep startup blank until the native lock covers the display. The helper
+  -- then starts the keyboard and the idle policy in this private session.
+  hl.dispatch(hl.dsp.dpms({ monitor = "DSI-1", action = "disable" }))
+  hl.exec_cmd("/usr/local/bin/r8q-screen-lock startup")
 end)
 
 -- The private desktop PipeWire session owns the speaker volume.

@@ -51,7 +51,6 @@
     "omarchy.battery",
     "omarchy.idle",
     "omarchy.nightlight",
-    "omarchy.lock",
     "omarchy.osd",
     "omarchy.polkit"
   ]

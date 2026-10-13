@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Phone session-lock and DPMS coordination; never handles credentials."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+
+def command(args, timeout=3):
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    if result.returncode:
+        raise RuntimeError("Command failed: " + args[0])
+    return result.stdout.strip()
+
+
+def status():
+    return json.loads(command(["/usr/bin/omarchy-shell", "lock", "status"]))
+
+
+def secure(state):
+    return state.get("secure") is True and state.get("sessionLocked") is True and state.get("requested") is True
+
+
+def wait_secure():
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        try:
+            if secure(status()):
+                return
+            command(["/usr/bin/omarchy-shell", "lock", "lock"])
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(0.1)
+    raise RuntimeError("Compositor did not confirm a secure lock")
+
+
+def dpms(action):
+    command(["/usr/bin/hyprctl", "dispatch", 'hl.dsp.dpms({ monitor = "DSI-1", action = "' + action + '" })'])
+
+
+def display_on():
+    displays = json.loads(command(["/usr/bin/hyprctl", "monitors", "-j"]))
+    for monitor in displays:
+        if monitor.get("name") == "DSI-1":
+            return monitor.get("dpmsStatus") is True
+    raise RuntimeError("Phone display not found")
+
+
+def wake():
+    dpms("enable")
+    # Rearm the locked-screen timer after hardware wake; activity cannot unlock.
+    try:
+        command(["/usr/bin/omarchy-shell", "lock", "activity"])
+    except (RuntimeError, ValueError, subprocess.TimeoutExpired):
+        pass
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ("status", "lock", "blank", "blank-confirmed", "wake", "power", "startup"):
+        raise RuntimeError("Usage: r8q-screen-lock status|lock|blank|blank-confirmed|wake|power|startup")
+    if os.geteuid() != 1000:
+        raise RuntimeError("Run in the alarm desktop session")
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", ""))
+    if str(runtime) != "/run/r8q-desktop" or runtime.stat().st_uid != 1000:
+        raise RuntimeError("Invalid desktop runtime directory")
+    os.environ.setdefault("OMARCHY_PATH", "/usr/share/omarchy")
+    action = sys.argv[1]
+    curtain = runtime / "r8q-lock-startup"
+    if action == "status":
+        print(json.dumps(status()))
+        return
+    if action == "wake":
+        if curtain.exists() and not secure(status()):
+            raise RuntimeError("Startup lock is not secure yet")
+        wake()
+        return
+    # Independent wake calls must not wait behind lock IPC requests: the lock
+    # service invokes wake while this process is waiting for secure coverage.
+    with (runtime / "r8q-screen-control.lock").open("a") as guard:
+        fcntl.flock(guard, fcntl.LOCK_EX)
+        if action == "startup":
+            curtain.touch(mode=0o600)
+            dpms("disable")
+            # Start ordinary session clients only behind the startup curtain.
+            subprocess.Popen(["/usr/bin/omarchy-launch-shell"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            wait_secure()
+            curtain.unlink()
+            dpms("enable")
+            subprocess.Popen(["/usr/local/bin/r8q-squeekboard"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["/usr/bin/hypridle", "-c", "/usr/share/r8q/omarchy/phone-hypridle.conf"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif action == "power" and not display_on():
+            wait_secure()
+            wake()
+        elif action == "blank-confirmed":
+            if not secure(status()):
+                raise RuntimeError("Refusing to blank without confirmed lock")
+            dpms("disable")
+        else:
+            wait_secure()
+            if action in ("power", "blank"):
+                dpms("disable")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as error:
+        print("r8q-screen-lock: " + str(error), file=sys.stderr)
+        sys.exit(1)

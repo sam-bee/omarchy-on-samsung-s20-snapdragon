@@ -226,8 +226,8 @@ Item {
                         id: passwordInput
                         objectName: "lock-password-input"
                         Accessible.role: Accessible.EditableText
-                        Accessible.name: "Password"
-                        Accessible.description: "Enter the password for the locked session"
+                        Accessible.name: "PIN"
+                        Accessible.description: "Enter the PIN for the locked session"
                         anchors.fill: parent
                         anchors.leftMargin: 18
                         anchors.rightMargin: 18
@@ -276,7 +276,7 @@ Item {
                         anchors.fill: passwordInput
                         z: 2
                         enabled: false
-                        text: root.authenticatingPassword ? "Checking…" : root.failureMessage.length > 0 ? root.failureMessage : "Enter password or use keypad"
+                        text: root.authenticatingPassword ? "Checking…" : root.failureMessage.length > 0 ? root.failureMessage : "Enter PIN or use keypad"
                         color: root.authenticatingPassword ? "#b9c5da" : root.failureMessage.length > 0 ? "#f6a0a0" : "#9caac2"
                         font.pixelSize: root.portrait ? 18 : 17
                         font.italic: root.failureMessage.length > 0
