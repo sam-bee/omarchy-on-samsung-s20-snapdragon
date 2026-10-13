@@ -2,13 +2,28 @@
 
 Date: 2026-10-13
 
+Evening checkpoint: native PIN locking is accepted, the cold backup passed a
+complete scratch restore, and the disposable early-boot touch/LUKS/ext4 probe
+passed on the handset. Private boot credential provisioning also succeeded;
+the header and recovery key are verified in the operator-approved private
+laptop folder. The phone still boots its original plaintext USERDATA root.
+The production encrypted-root image has not been installed or booted.
+
+The operator cannot touch the phone until October 14 evening. Leave its
+current Linux session and USB connection running. Before conversion, complete
+the privileged disposable block-FD fixture and the remaining negative prompt
+checks. Firmware Mass Storage selection and the first private encrypted boot
+require the operator at the phone. Current task receipts and outstanding
+checks are in the October 13 project log; earlier baseline sections below
+describe the assessment state rather than the evening live state.
+
 This document records the optional kernel prerequisites and isolated boot
 candidate tooling. The fragment
 [`config/r8q_encryption.config`](../config/r8q_encryption.config)
 is not wired into the default build. It is insufficient by itself to encrypt
 or unlock a root. The later candidate build does not install or encrypt anything.
 
-## Live and repository baseline
+## Historical assessment baseline
 
 The current live checkpoint supplied from read-only phone inspection is the
 same October 12 kernel #5 boot (`760acab7`), with `/dev/sda36` as the ext4
