@@ -12,9 +12,12 @@ Linux 7.1.2 builds its counter, payload, metadata and set expressions into
 installed helper uses this backend before its first container start.
 
 The first candidate preserves the accepted plaintext boot initramfs. It does
-not perform encryption migration. After encrypted-root acceptance, prepare a
-separate boot payload with the accepted encrypted initramfs and matching early
-modules, and validate that exact payload before a trial.
+not perform encryption migration. Encrypted boot was subsequently accepted
+on 2026-10-15 with the production04 EFI recorded in
+[the encryption documentation](r8q-encryption.md). Before a Waydroid kernel
+trial, prepare a separate boot payload with that accepted encrypted initramfs
+and matching early modules, and validate the exact payload. The retained
+plaintext payload cannot boot the phone's current encrypted root.
 
 ## Prepare and build offline
 
