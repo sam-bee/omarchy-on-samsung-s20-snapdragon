@@ -335,6 +335,9 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         self.assertIn("mknodes", generated)
         self.assertIn("udevadm", generated)
         self.assertIn("/dev/mapper/$MAPPER", generated)
+        self.assertIn("umask 077", generated)
+        self.assertIn("redirection-created marker mode 0600", generated)
+        self.assertNotIn('chmod 0600 "$HANDOFF_MARKER"', generated)
         self.assertIn("FAIL CLOSED", generated)
         # The shipped probe BusyBox has integer sleep only (no fancy/fractional
         # sleep feature), so every generated wait must remain whole seconds.

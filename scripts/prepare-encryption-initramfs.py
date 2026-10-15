@@ -604,7 +604,10 @@ HANDOFF_MARKER=/run/r8q-encryption-adapter-handoff
     printf 'touch_drivers=absent\n'
     printf 'touch_input_events=absent\n'
 }} > "$HANDOFF_MARKER" || fail_closed adapter-handoff-marker
-chmod 0600 "$HANDOFF_MARKER" || fail_closed adapter-handoff-marker-mode
+# umask 077 above makes this redirection-created marker mode 0600.  The
+# production BusyBox intentionally omits the chmod applet, so do not depend
+# on a second mode-changing command here.  The marker is new in this private
+# tmpfs and no pre-existing file can be reused.
 mkdir -p /newroot/run
 mount -o move /run /newroot/run 2>/dev/null || fail_closed run-move
 umount /proc 2>/dev/null || :
