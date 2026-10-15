@@ -1,9 +1,12 @@
 # Waydroid kernel candidate
 
 The optional Waydroid kernel adds built-in Binder and binderfs, active PSI,
-and native nftables/NAT to the accepted Linux 7.1.2 configuration. Its release
-is `7.1.2-r8q-waydroid1`. The default kernel build and phone startup profile
-continue to use their existing configuration.
+and native nftables/NAT to the accepted Linux 7.1.2 configuration. The first
+candidate, `7.1.2-r8q-waydroid1`, passed offline validation on October 13.
+The combined encrypted-root candidate, `7.1.2-r8q-waydroid2`, passed offline
+validation and was installed for an authorized boot trial on October 15.
+Reboot was queued at 21:59 UTC. New-boot acceptance awaits private storage
+passphrase entry on the handset and the functional regression checks.
 
 The network configuration targets the native nftables rules in
 [Waydroid 1.6.3's helper](https://raw.githubusercontent.com/waydroid/waydroid/1.6.3/data/scripts/waydroid-net.sh).
@@ -15,11 +18,76 @@ The first candidate preserves the accepted plaintext boot initramfs. It does
 not perform encryption migration. Encrypted boot was subsequently accepted
 on 2026-10-15 with the production04 EFI recorded in
 [the encryption documentation](r8q-encryption.md). Before a Waydroid kernel
-trial, prepare a separate boot payload with that accepted encrypted initramfs
-and matching early modules, and validate the exact payload. The retained
-plaintext payload cannot boot the phone's current encrypted root.
+trial, prepare a separate boot payload with built-in device-mapper, dm-crypt
+and the accepted crypto dependencies, as well as the accepted encrypted
+initramfs with matching early modules. The Waydroid1 configuration lacks
+dm-crypt; changing its archive alone is insufficient. Its retained plaintext
+payload cannot boot the phone's current encrypted root.
 
-## Prepare and build offline
+## Combined encrypted candidate
+
+The October 15 build reuses the pinned private source and copies generated
+Waydroid1 build state into a separate output. It quarantines old final modules
+and lets kbuild rebuild the configuration dependencies. The resolved delta
+from Waydroid1 is eleven options: release, archive input and the built-in
+encryption dependency closure. Audio, Binder, PSI and networking selections
+remain unchanged.
+
+Stage 1 uses the accepted production04 archive as an intermediate. Its
+embedded RTC2 modules are deliberately temporary, so this stage is not
+deployable. Once matching modules have been staged,
+`prepare-waydroid-encrypted-initramfs.py` clones the accepted runtime and
+replaces exactly the four early modules, their release paths and their hashes.
+The kernel must then be relinked with the new archive and pass
+`validate-waydroid-encrypted-candidate.py`.
+
+Hardware preparation preserves the accepted RTC2 global helpers, units,
+module tree and private audio/battery payloads byte-for-byte. The new helpers
+live under `/usr/local/lib/r8q-kernel-profiles/7.1.2-r8q-waydroid2/`; five
+service drop-ins select the old or new profile by the exact running release.
+Only the curated matching module closure enters normal module lookup.
+This makes restoration of the accepted encrypted EFI compatible with the
+rootfs hardware configuration. The raw Samsung BOOT/UEFI partition and
+active DTB are preserved.
+
+The original 297-entry screen-lock protection manifest remains the baseline.
+Deployment must verify those files and append only the reviewed new file
+hashes, with a private rollback copy. It must install the new rootfs profile
+and modules before replacing CACHE's EFI, keep the accepted encrypted EFI
+for recovery, and leave running hardware services alone until reboot.
+
+The final EFI is 67,631,616 bytes, SHA-256
+`f42452151822a53899ca826b8e55262f197b1b8fdfe660cab511551daaabb23b`.
+Offline validation checked 1,568 matching modules, all four early modules at
+mode 0744, and 1,234 unchanged accepted runtime files. The hardware bundle
+selects 78 modules, with 14 freshly generated indexes and 18 audited module
+lookup plans. Its exact five dispatch drop-ins and 113 new rootfs files
+were independently reviewed before installation.
+
+The first live transaction stopped before replacing EFI because the public
+metadata check required the appended protection manifest to retain its old
+size/hash. It rolled back completely; an independent SSH check verified the
+297-entry baseline and healthy services. The corrected verifier accepts only
+the exact computed appended manifest while retaining all ownership/mode
+checks. Eleven transaction/rollback fixtures passed with the actual manifest
+metadata row included. The retry installed successfully. Independent checks
+then passed all 410 protected entries, all 147 public hardware metadata
+records (allowing only the planned manifest append), and zero failed services
+on the still-running RTC2 kernel.
+
+The accepted EFI04 is saved on CACHE as
+`EFI/BOOT/BOOTAA64.EFI.WAYDROID2-SAVED-FOR-ROLLBACK` and locally in
+`deployment-preparation/rollback/BOOTAA64.EFI.ENCRYPTED04-SAVED`. Its accepted
+SHA-256 is
+`730627f49b8d41b9bdc6ef7931fe94911636003c61596c84d769d532ad27c49b`.
+The raw Samsung BOOT/UEFI partition and external DTB remain unchanged.
+
+Artifacts and transport receipts are under
+`out/waydroid-encrypted-20261015/`. Android images and Waydroid userspace are
+a subsequent step after encrypted boot, native locking and hardware pass
+their regression checks on the new kernel.
+
+## Historical Waydroid1 build
 
 Use the existing compiler recorded by the accepted build. The scripts require
 the matching kernel source and retained RTC2 artifacts; they refuse different
