@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import stat
 import struct
 import subprocess
 import sys
@@ -148,8 +149,12 @@ class EncryptionInitramfsTests(unittest.TestCase):
         fake_root.mkdir(parents=True)
         for directory in ("dev", "proc", "sys", "run", "newroot"):
             (fake_root / directory).mkdir(parents=True)
+        boot_id = fake_root / "proc/sys/kernel/random/boot_id"
+        boot_id.parent.mkdir(parents=True, exist_ok=True)
+        boot_id.write_text("test-boot-id\n", encoding="utf-8")
         (fake_root / "sys/class/block/sda36").mkdir(parents=True)
         (fake_root / "sys/class/block/sda36/uevent").write_text("PARTNAME=userdata\n", encoding="utf-8")
+        (fake_root / "sys/bus/i2c/devices/i2c-5").mkdir(parents=True)
         (fake_root / "dev/sda36").write_bytes(b"userdata-fixture")
         (fake_root / "dev/mapper").mkdir(parents=True)
         qroot = shlex.quote(str(fake_root))
@@ -341,6 +346,12 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         self.assertTrue(manifest_one["udevd_alias_from_udevadm"])
         self.assertEqual(manifest_one["udevd"], "usr/lib/systemd/systemd-udevd")
         self.assertEqual(manifest_one["touch_order"][:2], ["gpi.ko", "i2c-qcom-geni.ko (r8q_force_fifo=1)"])
+        self.assertEqual(manifest_one["adapter_handoff"]["schema"], "r8q-encryption-adapter-handoff/v1")
+        self.assertEqual(manifest_one["adapter_handoff"]["retained_modules"], ["gpi.ko", "i2c-qcom-geni.ko"])
+        self.assertIn("gpi_ownership=inherited", generated)
+        self.assertIn("touch_drivers=absent", generated)
+        self.assertNotIn("rmmod i2c_qcom_geni", generated)
+        self.assertNotIn("rmmod gpi", generated)
         syntax = subprocess.run(["sh", "-n", str(first / "init")], text=True, capture_output=True)
         self.assertEqual(syntax.returncode, 0, syntax.stderr)
 
@@ -359,7 +370,7 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         self.assertEqual(sum(line.startswith("dmsetup mknodes ") for line in lines), 1)
         self.assertIn("unl0kr -n", "\n".join(lines))
         unloads = [line.split(maxsplit=1)[1] for line in lines if line.startswith("rmmod ")]
-        self.assertEqual(unloads, ["fts5cu56a", "i2c_qcom_geni", "gpi"])
+        self.assertEqual(unloads, ["fts5cu56a"])
         self.assertTrue(any(line.startswith("mount -t ext4 ") and "/newroot" in line for line in lines))
         self.assertFalse(any(line.startswith("mount -t ext4 ") and "sda36" in line for line in lines))
         self.assertFalse((fake_root / "run/r8q-encryption-passphrase").exists())
@@ -369,6 +380,17 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         run_move = next(i for i, line in enumerate(lines) if line.startswith("mount -o move "))
         self.assertLess(udev_log_remove, run_move)
         self.assertTrue((fake_root / "dev/mapper/cryptroot").exists())
+        marker = fake_root / "run/r8q-encryption-adapter-handoff"
+        marker_text = marker.read_text(encoding="utf-8")
+        self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
+        self.assertIn("schema=r8q-encryption-adapter-handoff/v1", marker_text)
+        self.assertIn("boot_id=test-boot-id", marker_text)
+        self.assertIn("gpi_ownership=inherited", marker_text)
+        self.assertIn("geni_ownership=inherited", marker_text)
+        self.assertIn("i2c_adapters=1", marker_text)
+        self.assertIn("fifo=1", marker_text)
+        self.assertIn("touch_drivers=absent", marker_text)
+        self.assertIn("touch_input_events=absent", marker_text)
 
     def test_protocol_mount_failure_unmounts_candidate_before_mapper_close(self):
         candidate = self._make_protocol_candidate("candidate-protocol-mount-failure")

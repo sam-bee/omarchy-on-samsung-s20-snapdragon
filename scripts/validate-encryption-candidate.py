@@ -137,8 +137,15 @@ def main():
                  initroot / 'etc/r8q-encryption-manifest.json', output / 'embedded-initramfs-manifest.json',
                  output / 'kernel-source-manifest.jsonl'):
         files[str(path)] = dict(bytes=path.stat().st_size, sha256=sha(path.read_bytes()))
-    probe = metadata.get('userdata_targeted') is False and metadata.get('root_handoff') is False
-    candidate_kind = ('r8q-test-only-volatile-encryption-boot-probe' if probe
+    # A public probe may now exercise the PID1/switch_root boundary against a
+    # volatile loop-backed root.  Keep that distinct from both the original
+    # no-handoff probe and the production encrypted-root candidate; the
+    # metadata still requires userdata_targeted=false for either test kind.
+    public_probe = metadata.get('userdata_targeted') is False
+    root_handoff_probe = public_probe and metadata.get('kind') == 'r8q-test-root-handoff-encryption-boot-probe'
+    probe = public_probe and metadata.get('root_handoff') is False
+    candidate_kind = ('r8q-test-root-handoff-encryption-boot-probe' if root_handoff_probe
+                      else 'r8q-test-only-volatile-encryption-boot-probe' if probe
                       else 'r8q-isolated-encrypted-root-boot-candidate')
     record = dict(kind=candidate_kind, kernel_release='7.1.2-r8q-rtc2',
                   source=str(source), source_files=count, source_sha256=source_hash,

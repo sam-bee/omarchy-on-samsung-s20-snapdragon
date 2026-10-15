@@ -1,21 +1,19 @@
 # r8q encryption prerequisites and early-unlock plan
 
-Date: 2026-10-13
+Date: 2026-10-15
 
-Evening checkpoint: native PIN locking is accepted, the cold backup passed a
-complete scratch restore, and the disposable early-boot touch/LUKS/ext4 probe
-passed on the handset. Private boot credential provisioning also succeeded;
-the header and recovery key are verified in the operator-approved private
-laptop folder. The phone still boots its original plaintext USERDATA root.
-The production encrypted-root image has not been installed or booted.
+Current conversion checkpoint: USERDATA has been rewritten and converted to
+LUKS2. The backup was restored inside the encrypted filesystem and passed the
+full content/metadata comparison. Migration stopped during baseline refresh
+because its baseline checker rejected legitimate user-owned configuration
+files and Arch's `/lib -> usr/lib` alias for two protected module paths. The encrypted boot EFI has not yet been installed.
+Leave the phone in USB Mass Storage until the guarded overlay repair finishes;
+do not reboot the current incomplete deployment.
 
-The operator cannot touch the phone until October 14 evening. Leave its
-current Linux session and USB connection running. Before conversion, complete
-the privileged disposable block-FD fixture and the remaining negative prompt
-checks. Firmware Mass Storage selection and the first private encrypted boot
-require the operator at the phone. Current task receipts and outstanding
-checks are in the October 13 project log; earlier baseline sections below
-describe the assessment state rather than the evening live state.
+The corrected public native PID1 probe, fresh cold backup, scratch restore,
+and block-FD fixture passed. Real encrypted-root systemd boot and final screen
+locking checks remain outstanding. The private backup and recovery material
+remain in the approved private laptop folder outside Syncthing.
 
 This document records the optional kernel prerequisites and isolated boot
 candidate tooling. The fragment
@@ -136,9 +134,13 @@ For a touch-first LUKS prompt, evaluate these two paths explicitly:
    metadata, and the required firmware/devices. Load them in the same order,
    wait for a real event node, then hand ownership to the root services. The
    current route helper rejects unexpected preloaded modules and insists on
-   exactly one GPI/GENI instance ([`r8q-usb-route-up.sh`: 151-230](../rootfs/usr/local/sbin/r8q-usb-route-up.sh)); this handoff needs a reviewed
-   marker or service adjustment before deployment. Do not let a later service
-   reload a bound controller.
+   exactly one GPI/GENI instance ([`r8q-usb-route-up.sh`: 151-230](../rootfs/usr/local/sbin/r8q-usb-route-up.sh)). GPI has no usable
+   module-exit path on this kernel and is permanent for this boot; GENI remains resident
+   with `r8q_force_fifo=1`. The encrypted initramfs verifies those adapters and
+   records a private mode-0600 handoff marker. Its module hashes must match the
+   `EXPECTED_GPI_SHA256` and `EXPECTED_GENI_SHA256` values used by the root
+   helper. Only FTS5CU56A and Zinitix are unloaded before root handoff. Do not
+   let a later service reload a bound controller.
 2. **Convert the relevant chain to built-in.** This removes module loading from
    the prompt path but requires a kernel/init ordering proof, preserves the
    FIFO parameter, and must handle both board touch variants. It is a later
@@ -284,9 +286,12 @@ then GENI with FIFO forced, and selects the responding touch controller.
 It requires a LUKS2 header, pipes unl0kr output directly to cryptsetup with
 `-n` forced to avoid an extra newline, and permits three timed attempts.
 It explicitly creates mapper nodes and mounts only `/dev/mapper/cryptroot`.
-After unlocking it stops udev and unloads the four early touch modules in
-reverse order, so the current root startup helpers retain their existing
-ownership checks. This teardown and subsequent reload need a cold-boot test.
+After unlocking it stops udev, unloads only FTS5CU56A and Zinitix, and retains
+GPI and GENI with FIFO forced. GPI has no usable module-exit path on this
+kernel and is permanent for this boot. The retained adapter bytes are checked against the root helper's
+expected hashes, and the handoff record is mode 0600 before `/run` moves into
+the new root. The native PID1 stub checks this ownership contract; it does not
+prove a production systemd boot.
 Failure never mounts plaintext USERDATA or starts a network/debug shell.
 Pre-handoff failure handlers clean tracked mounts and attempt mapper close.
 The final BusyBox `switch_root` must replace PID 1 with `exec`; calling it in
@@ -335,16 +340,24 @@ and relinking produced this accepted payload. Its receipt is
 `kernel02/candidate-manifest.json`. These are build/audit results, not a boot
 or real encrypted-volume test.
 
-## October 13 migration preparation
+## October 15 preparation status
 
-Native screen locking is complete and accepted on the handset; the earlier
-lock-first discussion above is historical. Encryption remains inactive until
-an explicit successful encrypted-root boot is recorded.
+Native screen locking is complete and accepted on the handset. Encryption
+remains inactive until an explicit successful encrypted-root boot is recorded.
 
-The cold backup is captured through Mu Mass Storage with ext4 journal replay
-disabled. A separate scratch ext4 restore must pass file content, ownership,
-permissions, links and filesystem checks before USERDATA migration. Keep
-these private artifacts out of Git: the root archive contains credentials.
+The fresh October 15 cold backup is captured through Mu Mass Storage with
+ext4 journal replay disabled. Its scratch ext4 restore and disposable block-FD
+fixture passed content, ownership, permissions, links and filesystem checks.
+Keep these private artifacts out of Git: the root archive contains credentials.
+
+ROOT-HANDOFF2 exercised the native PID1/switch-root stub with the public
+wrong-byte, empty-EOF, no-input watchdog and normal-return cases. The stub
+checks the retained GPI/GENI adapters, FIFO setting and unloaded touch-driver
+markers; it does not prove that production systemd can boot the encrypted root.
+Pinned SSH verified the exact ROOT-HANDOFF2 PASS receipt and trial image hash,
+restored known EFI/DTB, normal root identity, lock baseline and services. The
+runtime acceptance is recorded in root-handoff-acceptance02.json; production
+systemd boot remains unproven until conversion and the first private boot.
 
 `scripts/prepare-encryption-probe.py` generates a distinct test-only early
 boot image from a supplied production staging tree and tool closure. It

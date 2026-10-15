@@ -316,7 +316,16 @@ def quote(value: str) -> str:
     return "''" if not value else "'" + value.replace("'", "'\\''") + "'"
 
 
-def make_init(release: str, cryptsetup: str, ui: str, udevadm: str, udevd: str, dmsetup: str, ui_args: list[str]) -> str:
+def make_init(
+    release: str,
+    cryptsetup: str,
+    ui: str,
+    udevadm: str,
+    udevd: str,
+    dmsetup: str,
+    ui_args: list[str],
+    module_hashes: dict[str, str],
+) -> str:
     modules = f"/lib/modules/{release}/r8q-encryption"
     # BuffyBox/unl0kr appends a newline by default. The -n contract is
     # mandatory because a LUKS passphrase must not gain an implicit byte.
@@ -325,6 +334,10 @@ def make_init(release: str, cryptsetup: str, ui: str, udevadm: str, udevd: str, 
     udevadm_path = "/" + udevadm
     udevd_path = "/" + udevd
     dmsetup_path = "/" + dmsetup
+    gpi_sha256 = module_hashes["gpi.ko"]
+    geni_sha256 = module_hashes["i2c-qcom-geni.ko"]
+    fts_sha256 = module_hashes["fts5cu56a.ko"]
+    zinitix_sha256 = module_hashes["zinitix.ko"]
     return f'''#!/bin/busybox sh
 # Generated disposable r8q encrypted-root init. No plaintext-init fallback is embedded.
 set -eu
@@ -371,7 +384,10 @@ stop_udev() {{
 }}
 
 unload_touch_best_effort() {{
-    for module in fts5cu56a zinitix i2c_qcom_geni gpi; do
+    # GPI has no module exit path in this kernel and must remain resident.
+    # GENI owns the adapter needed by the production root and also remains
+    # resident. Only the disposable controller drivers are best-effort here.
+    for module in fts5cu56a zinitix; do
         if [ -d "/sys/module/$module" ]; then
             rmmod "$module" >/dev/null 2>&1 || :
         fi
@@ -540,15 +556,55 @@ NEWROOT_MOUNTED=1
 mount -t devtmpfs devtmpfs /newroot/dev 2>/dev/null || fail_closed newroot-dev
 NEWROOT_DEV_MOUNTED=1
 
-# Return ownership to the production root helper in reverse dependency order.
+# GPI has no cleanup_module/remove path and cannot be safely unloaded. Keep
+# GPI and GENI resident; the production helper explicitly validates and owns
+# those exact preloaded modules. Remove only the disposable touch drivers.
 stop_udev
 rm -f "$UDEV_LOG"
-for module in fts5cu56a zinitix i2c_qcom_geni gpi; do
+for module in fts5cu56a zinitix; do
     if [ -d "/sys/module/$module" ]; then
         rmmod "$module" >/dev/null 2>&1 || fail_closed "rmmod-$module"
     fi
     [ ! -d "/sys/module/$module" ] || fail_closed "module-still-loaded-$module"
 done
+[ ! -e /sys/bus/i2c/drivers/fts5cu56a ] || fail_closed touch-driver-still-bound
+[ ! -e /sys/bus/i2c/drivers/Zinitix-TS ] || fail_closed touch-driver-still-bound
+[ -d /sys/module/gpi ] || fail_closed gpi-not-retained
+[ -d /sys/module/i2c_qcom_geni ] || fail_closed geni-not-retained
+I2C_ADAPTERS=0
+for adapter in /sys/bus/i2c/devices/i2c-*; do
+    [ -e "$adapter" ] || continue
+    I2C_ADAPTERS=$((I2C_ADAPTERS + 1))
+done
+[ "$I2C_ADAPTERS" -gt 0 ] || fail_closed geni-adapter-missing
+FIFO_HANDOFF=$(cat "$FIFO_PARAM" 2>/dev/null | tr -d '\r\n')
+case "$FIFO_HANDOFF" in
+    1|Y|y) ;;
+    *) fail_closed geni-fifo-disabled-at-handoff ;;
+esac
+BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+[ -n "$BOOT_ID" ] || fail_closed boot-id-missing
+HANDOFF_MARKER=/run/r8q-encryption-adapter-handoff
+{{
+    printf 'schema=r8q-encryption-adapter-handoff/v1\n'
+    printf 'boot_id=%s\n' "$BOOT_ID"
+    printf 'kernel=%s\n' '{release}'
+    printf 'gpi_module=lib/modules/{release}/r8q-encryption/gpi.ko\n'
+    printf 'gpi_sha256=%s\n' '{gpi_sha256}'
+    printf 'geni_module=lib/modules/{release}/r8q-encryption/i2c-qcom-geni.ko\n'
+    printf 'geni_sha256=%s\n' '{geni_sha256}'
+    printf 'fts_module=lib/modules/{release}/r8q-encryption/fts5cu56a.ko\n'
+    printf 'fts_sha256=%s\n' '{fts_sha256}'
+    printf 'zinitix_module=lib/modules/{release}/r8q-encryption/zinitix.ko\n'
+    printf 'zinitix_sha256=%s\n' '{zinitix_sha256}'
+    printf 'gpi_ownership=inherited\n'
+    printf 'geni_ownership=inherited\n'
+    printf 'i2c_adapters=%s\n' "$I2C_ADAPTERS"
+    printf 'fifo=%s\n' "$FIFO_HANDOFF"
+    printf 'touch_drivers=absent\n'
+    printf 'touch_input_events=absent\n'
+}} > "$HANDOFF_MARKER" || fail_closed adapter-handoff-marker
+chmod 0600 "$HANDOFF_MARKER" || fail_closed adapter-handoff-marker-mode
 mkdir -p /newroot/run
 mount -o move /run /newroot/run 2>/dev/null || fail_closed run-move
 umount /proc 2>/dev/null || :
@@ -682,6 +738,7 @@ def prepare(options: argparse.Namespace) -> Path:
         os.chmod(target, stat.S_IMODE(modules[name].stat().st_mode) | stat.S_IXUSR)
         module_paths[name] = rel.as_posix()
         manifest_files[rel.as_posix()] = {"source": modules[name].name, "sha256": digest(modules[name]), "size": modules[name].stat().st_size, "kind": "kernel-module", "vermagic": vermagic(modules[name])}
+    module_hashes = {name: digest(modules[name]) for name in MODULES}
     crypt_real = Path(os.path.realpath(options.cryptsetup))
     ui_real = Path(os.path.realpath(options.unl0kr))
     dmsetup_real = Path(os.path.realpath(options.dmsetup))
@@ -691,7 +748,7 @@ def prepare(options: argparse.Namespace) -> Path:
     udevadm_rel = udevadm_rel.as_posix()
     udevd_rel = udevd_rel.as_posix()
     generated = output / "init"
-    generated.write_text(make_init(options.kernel_release, crypt_rel, ui_rel, udevadm_rel, udevd_rel, dmsetup_rel, options.ui_arg), encoding="utf-8")
+    generated.write_text(make_init(options.kernel_release, crypt_rel, ui_rel, udevadm_rel, udevd_rel, dmsetup_rel, options.ui_arg, module_hashes), encoding="utf-8")
     os.chmod(generated, 0o755)
     manifest_files["init"] = {"source": "generated", "sha256": digest(generated), "size": generated.stat().st_size, "kind": "generated-encrypted-init"}
     metadata = {
@@ -710,6 +767,14 @@ def prepare(options: argparse.Namespace) -> Path:
         "mapper": "cryptroot",
         "touch_order": ["gpi.ko", "i2c-qcom-geni.ko (r8q_force_fifo=1)", "fts5cu56a.ko", "zinitix.ko"],
         "touch_modules": module_paths,
+        "adapter_handoff": {
+            "schema": "r8q-encryption-adapter-handoff/v1",
+            "marker": "/run/r8q-encryption-adapter-handoff",
+            "retained_modules": ["gpi.ko", "i2c-qcom-geni.ko"],
+            "unloaded_modules": ["fts5cu56a.ko", "zinitix.ko"],
+            "fifo": "r8q_force_fifo=1",
+            "touch_drivers": "absent",
+        },
         "fail_closed": True,
         "files": dict(sorted(manifest_files.items())),
     }
