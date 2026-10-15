@@ -5,8 +5,10 @@ and native nftables/NAT to the accepted Linux 7.1.2 configuration. The first
 candidate, `7.1.2-r8q-waydroid1`, passed offline validation on October 13.
 The combined encrypted-root candidate, `7.1.2-r8q-waydroid2`, passed offline
 validation and was installed for an authorized boot trial on October 15.
-Reboot was queued at 21:59 UTC. New-boot acceptance awaits private storage
-passphrase entry on the handset and the functional regression checks.
+After private handset unlock on October 16 (UK local time), the encrypted
+boot and all thirteen functional regression checks passed. The operator
+confirmed the desktop and side-button PIN lock/unlock. Stereo playback
+passed; physical listening confirmation remains pending.
 
 The network configuration targets the native nftables rules in
 [Waydroid 1.6.3's helper](https://raw.githubusercontent.com/waydroid/waydroid/1.6.3/data/scripts/waydroid-net.sh).
@@ -86,6 +88,36 @@ Artifacts and transport receipts are under
 `out/waydroid-encrypted-20261015/`. Android images and Waydroid userspace are
 a subsequent step after encrypted boot, native locking and hardware pass
 their regression checks on the new kernel.
+
+## Encrypted boot acceptance
+
+The observed Waydroid2 boot ID is
+`1a7fa1b5-c8f9-4da4-b77c-5c3294f8d1c7`. The root remains
+`/dev/mapper/cryptroot` with the accepted root/LUKS UUIDs and `sda36` backing
+partition. The running configuration matches the audited build. All 410
+protected entries, 147 public hardware metadata records, matching module
+files, early adapter handoff, udev/GPU permissions and required services pass.
+The raw Samsung BOOT partition remains unchanged.
+
+Binderfs created and opened `binder`, `hwbinder` and `vndbinder`, with
+protocol version 8 on all three devices. memfd and CPU/memory/I/O pressure
+interfaces pass. An isolated namespace test created bridge/veth devices,
+nftables filtering, NAT/masquerade and writable overlay storage, then
+removed its resources. These are host prerequisites; Android app startup
+and end-to-end container connectivity remain later acceptance gates.
+
+The first functional run exposed a diagnostic bug: after successful unmount,
+`findmnt --target` reported the containing `/run` filesystem. Cleanup now
+queries the exact `--mountpoint` and treats unexpected observation results
+as errors. Regression fixtures and the corrected full phone probe pass;
+independent final inspection found no remaining test resources or failed
+services. The original failed report and probe are retained for provenance.
+
+The Phone speakers stream passed stereo S16_LE at 48 kHz through the existing
+PipeWire sink. Software volume remained 0.85; mute and protected amplifier
+settings were unchanged. The quiet top-receiver/bottom-speaker listening
+check awaits the operator's confirmation. Detailed results and receipt hashes
+are in `out/waydroid-encrypted-20261015/kernel-boot-acceptance01.json`.
 
 ## Historical Waydroid1 build
 

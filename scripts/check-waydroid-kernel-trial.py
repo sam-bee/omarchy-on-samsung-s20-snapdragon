@@ -551,6 +551,20 @@ def command(argv, timeout=15, check=True, cwd=None):
     return result
 
 
+def exact_mountpoint_present(path):
+    """Return whether *path* itself is a mountpoint, not its parent mount."""
+    probe = command(["/usr/bin/findmnt", "-n", "-o", "TARGET", "--mountpoint", str(path)],
+                    timeout=15, check=False)
+    if probe.returncode == 1:
+        return False
+    require(probe.returncode == 0, "exact mountpoint observation failed")
+    expected = str(path)
+    observed = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
+    require(observed and all(line == expected for line in observed),
+            "exact mountpoint observation returned unexpected targets")
+    return True
+
+
 def safe_output(value, limit=320):
     value = SENSITIVE_RE.sub("<redacted>", value.replace("\\x00", ""))
     return value[-limit:]
@@ -778,12 +792,11 @@ def cleanup_binderfs(base, mountpoint, base_seed, mount_seed, mounted):
         except Exception as exc:
             errors.append("binderfs cleanup umount error: " + type(exc).__name__)
     # A timeout or an exception above must not skip the second observation and
-    # retry.  Keep the mountpoint until findmnt proves that it is gone.
+    # retry.  Keep the mountpoint until findmnt proves that this exact mountpoint
+    # is gone; --target would report the containing /run mount after unmount.
     still_mounted = False
     try:
-        probe = command(["/usr/bin/findmnt", "-n", "--target", str(mountpoint)],
-                        timeout=15, check=False)
-        still_mounted = probe.returncode == 0
+        still_mounted = exact_mountpoint_present(mountpoint)
     except Exception as exc:
         errors.append("binderfs cleanup mount observation error: " + type(exc).__name__)
         still_mounted = True
@@ -795,9 +808,7 @@ def cleanup_binderfs(base, mountpoint, base_seed, mount_seed, mounted):
         except Exception as exc:
             errors.append("binderfs cleanup retry error: " + type(exc).__name__)
         try:
-            probe = command(["/usr/bin/findmnt", "-n", "--target", str(mountpoint)],
-                            timeout=15, check=False)
-            still_mounted = probe.returncode == 0
+            still_mounted = exact_mountpoint_present(mountpoint)
         except Exception as exc:
             errors.append("binderfs cleanup retry observation error: " + type(exc).__name__)
             still_mounted = True
@@ -832,6 +843,7 @@ def check_binderfs():
     mount_seed = mountpoint.lstat()
     mounted = False
     devices = []
+    body_error = None
     try:
         command(["/usr/bin/mount", "-t", "binder", "-o", "nosuid,noexec", "binder", str(mountpoint)], timeout=20)
         mounted = True
@@ -875,8 +887,15 @@ def check_binderfs():
         return {{"mount": "binderfs", "mountpoint": str(mountpoint),
                 "binder_ctl_add": contract["binder_ctl_add"], "struct_size": contract["struct_size"],
                 "binder_version": contract["binder_version"], "devices": devices, "functional": True}}
+    except BaseException as exc:
+        body_error = exc
+        raise
     finally:
-        cleanup_binderfs(base, mountpoint, base_seed, mount_seed, mounted)
+        try:
+            cleanup_binderfs(base, mountpoint, base_seed, mount_seed, mounted)
+        except Exception:
+            if body_error is None:
+                raise
 
 
 def network_child():
@@ -900,6 +919,7 @@ def network_child():
               "runtime_resources_exercised": True, "module_dry_run": {{}}, "bridge": bridge,
               "veth": [veth_a, veth_b], "nft": {{}}, "overlay": False,
               "run_base": str(base)}}
+    body_error = None
     try:
         for name in CONFIG["network_modules"]:
             check = command(["/usr/bin/modprobe", "--dry-run", "--", name], timeout=15, check=False)
@@ -940,6 +960,9 @@ def network_child():
         require((upper / "r8q-upper-marker").is_file(), "overlay upper write missing")
         result["overlay"] = True
         return result
+    except BaseException as exc:
+        body_error = exc
+        raise
     finally:
         cleanup_errors = []
         def cleanup_command(argv, label):
@@ -954,9 +977,7 @@ def network_child():
         still_mounted = False
         for _ in range(2):
             try:
-                mount_probe = command(["/usr/bin/findmnt", "-n", "--target", str(merged)],
-                                      timeout=15, check=False)
-                still_mounted = mount_probe.returncode == 0
+                still_mounted = exact_mountpoint_present(merged)
             except Exception as exc:
                 cleanup_errors.append("overlay mount observation error: " + type(exc).__name__)
                 still_mounted = True
@@ -1003,7 +1024,7 @@ def network_child():
         else:
             cleanup_errors.append("network base retained while overlay mount remains")
         result["cleanup"] = {{"residual": cleanup_errors, "run_base_removed": base_removed}}
-        if cleanup_errors:
+        if cleanup_errors and body_error is None:
             raise ProbeError("network cleanup residual: " + "; ".join(cleanup_errors)[:280])
 
 
@@ -1362,16 +1383,20 @@ def self_test(output: Path) -> int:
     findmnt_calls = {"count": 0}
 
     class FixtureResult:
-        def __init__(self, returncode: int):
+        def __init__(self, returncode: int, stdout: str = ""):
             self.returncode = returncode
-            self.stdout = ""
+            self.stdout = stdout
             self.stderr = ""
 
     def fixture_command(argv, timeout=15, check=True, cwd=None):
         cleanup_calls.append(list(argv))
         if Path(argv[0]).name == "findmnt":
             findmnt_calls["count"] += 1
-            return FixtureResult(0 if findmnt_calls["count"] == 1 else 1)
+            # Model the real false positive: --target sees the containing
+            # /run mount after the leaf was removed; --mountpoint sees absent.
+            if "--mountpoint" in argv:
+                return FixtureResult(1)
+            return FixtureResult(0, "/run\n")
         return FixtureResult(0)
 
     original_command = namespace["command"]
@@ -1381,9 +1406,82 @@ def self_test(output: Path) -> int:
                                        cleanup_mount_seed, True)
     finally:
         namespace["command"] = original_command
-    require(not cleanup_base.exists() and findmnt_calls["count"] == 2 and
-            sum(Path(call[0]).name == "umount" for call in cleanup_calls) == 2,
-            "binder cleanup retry fixture did not verify removal")
+    require(not cleanup_base.exists() and findmnt_calls["count"] == 1 and
+            sum(Path(call[0]).name == "umount" for call in cleanup_calls) == 1 and
+            all("--mountpoint" in call for call in cleanup_calls if Path(call[0]).name == "findmnt"),
+            "binder cleanup containing-parent fixture did not verify exact removal")
+    retained_base = Path(tempfile.mkdtemp(prefix="r8q-waydroid-retained-fixture-"))
+    retained_mountpoint = retained_base / "binderfs"
+    retained_mountpoint.mkdir()
+    retained_base_seed = retained_base.lstat()
+    retained_mount_seed = retained_mountpoint.lstat()
+    retained_calls: list[list[str]] = []
+    retained_findmnt_calls = {"count": 0}
+
+    def retained_fixture_command(argv, timeout=15, check=True, cwd=None):
+        retained_calls.append(list(argv))
+        if Path(argv[0]).name == "findmnt":
+            retained_findmnt_calls["count"] += 1
+            return FixtureResult(0, str(retained_mountpoint) + "\n")
+        if Path(argv[0]).name == "umount":
+            return FixtureResult(1)
+        return FixtureResult(0)
+
+    namespace["command"] = retained_fixture_command
+    try:
+        try:
+            namespace["cleanup_binderfs"](retained_base, retained_mountpoint,
+                                           retained_base_seed, retained_mount_seed, True)
+        except namespace["ProbeError"] as exc:
+            require("binderfs mount remains mounted" in str(exc),
+                    "retained exact mount fixture lost the residual error")
+        else:
+            raise PreparationError("retained exact mount fixture unexpectedly passed")
+    finally:
+        namespace["command"] = original_command
+    require(retained_base.exists() and retained_findmnt_calls["count"] == 2 and
+            sum(Path(call[0]).name == "umount" for call in retained_calls) == 2 and
+            all("--mountpoint" in call for call in retained_calls if Path(call[0]).name == "findmnt"),
+            "retained exact mount fixture did not preserve residual mount")
+    retained_mountpoint.rmdir()
+    retained_base.rmdir()
+    body_error_base = Path(tempfile.mkdtemp(prefix="r8q-waydroid-body-error-fixture-"))
+    body_error_mountpoint = body_error_base / "binderfs"
+    body_error_calls: list[list[str]] = []
+    body_error_mkdtemp = namespace["tempfile"].mkdtemp
+
+    def body_error_fixture_command(argv, timeout=15, check=True, cwd=None):
+        body_error_calls.append(list(argv))
+        name = Path(argv[0]).name
+        if name == "findmnt":
+            if "PROPAGATION" in argv:
+                return FixtureResult(0, "private\n")
+            if "OPTIONS,FS-OPTIONS" in argv:
+                return FixtureResult(0, "nosuid,noexec\n")
+            return FixtureResult(0, str(body_error_mountpoint) + "\n")
+        if name == "umount":
+            return FixtureResult(1)
+        return FixtureResult(0)
+
+    namespace["tempfile"].mkdtemp = lambda prefix, dir: str(body_error_base)
+    namespace["command"] = body_error_fixture_command
+    try:
+        try:
+            namespace["check_binderfs"]()
+        except namespace["ProbeError"] as exc:
+            require("binderfs control node is missing" in str(exc) and
+                    "cleanup umount failed" not in str(exc),
+                    "Binderfs body error was masked by cleanup failure")
+        else:
+            raise PreparationError("body-error cleanup fixture unexpectedly passed")
+    finally:
+        namespace["tempfile"].mkdtemp = body_error_mkdtemp
+        namespace["command"] = original_command
+        try:
+            body_error_mountpoint.rmdir()
+            body_error_base.rmdir()
+        except OSError:
+            pass
     interrupt_base = Path(tempfile.mkdtemp(prefix="r8q-waydroid-interrupt-fixture-"))
     interrupt_mountpoint = interrupt_base / "binderfs"
     interrupt_mountpoint.mkdir()
@@ -1396,7 +1494,9 @@ def self_test(output: Path) -> int:
         interrupt_calls.append(list(argv))
         if Path(argv[0]).name == "findmnt":
             interrupt_findmnt_calls["count"] += 1
-            return FixtureResult(0 if interrupt_findmnt_calls["count"] == 1 else 1)
+            if interrupt_findmnt_calls["count"] == 1:
+                return FixtureResult(0, str(interrupt_mountpoint) + "\n")
+            return FixtureResult(1)
         return FixtureResult(0)
 
     saved_handlers = {signum: signal.getsignal(signum)
@@ -1456,7 +1556,9 @@ def self_test(output: Path) -> int:
         "prerequisite_gate_fixture": "PASS",
         "power_state_counterexamples": "PASS",
         "protected_manifest_counterexample": "PASS",
-        "binder_cleanup_retry_fixture": "PASS",
+        "binder_cleanup_containing_parent_fixture": "PASS",
+        "binder_cleanup_retained_exact_fixture": "PASS",
+        "binder_cleanup_original_error_fixture": "PASS",
         "interrupt_cleanup_fixture": "PASS",
         "main_interrupt_fixture": "PASS",
         "baseline_warning": baseline,
