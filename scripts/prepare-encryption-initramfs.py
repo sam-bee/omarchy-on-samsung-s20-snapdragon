@@ -433,7 +433,12 @@ mount -t proc proc /proc 2>/dev/null || fail_closed proc-mount
 mount -t sysfs sysfs /sys 2>/dev/null || fail_closed sysfs-mount
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || $BB mdev -s 2>/dev/null || fail_closed devtmpfs-mount
 mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs /run 2>/dev/null || fail_closed run-mount
-mkdir -p /run/udev /dev/mapper
+# udev's device database must be readable by the alarm compositor after the
+# private initramfs /run is moved into the real root. Keep the process-wide
+# umask 077 for credentials and the handoff marker, but explicitly create only
+# this directory with its public traversal mode; /dev/mapper stays private.
+mkdir -m 0755 -p /run/udev || fail_closed udev-dir
+mkdir -p /dev/mapper
 mknod -m 0600 /dev/mapper/control c 10 236 2>/dev/null || [ -e /dev/mapper/control ] || fail_closed mapper-control
 
 # Run udev in a tracked child. Parent-supplied rules and firmware are

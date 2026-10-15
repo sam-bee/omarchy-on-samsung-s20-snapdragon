@@ -2,16 +2,21 @@
 
 Date: 2026-10-15
 
-Current conversion checkpoint: USERDATA is LUKS2, and its restored contents
-passed a full archive comparison. The reviewed baseline repair passed its
-archive-backed fixture and device execution, the filesystem checked cleanly,
-and the encrypted boot EFI is installed. The first private encrypted-root boot
-and final screen-lock checks are pending; do not treat preparation as runtime
-acceptance.
+USERDATA encryption is deployed and verified. The Linux system, installed apps
+and user data run from LUKS2 `/dev/mapper/cryptroot`. A fresh production04 boot
+rejected a wrong boot passphrase, accepted the operator's private phrase, and
+reached the secured PIN screen automatically. Wrong-PIN rejection, correct-PIN
+unlock and side-button off/wake/unlock all passed.
+
+Pinned USB SSH verified the new boot ID, exact backing partition and UUIDs,
+all 297 protected hashes, adapter handoff, public udev metadata mode 0755 and
+private handoff marker mode 0600. Early credential FIFO/log paths were removed.
+All required services were active, no system services failed, and USB charging
+was online. The laptop's temporary automount changes were restored.
 
 The public native PID1 probe, fresh cold backup, scratch restore and block-FD
-fixture passed. The private backup and recovery material remain in the approved
-private laptop folder outside Syncthing. The final baseline contains 297 paths,
+fixture passed. The fresh October 15 cold backup and recovery material remain
+in the approved private laptop folder outside Syncthing. The final baseline contains 297 paths,
 preserving the original user ownership and the two verified Arch `/lib` aliases.
 
 This document records the optional kernel prerequisites and isolated boot
@@ -22,11 +27,10 @@ or unlock a root. The later candidate build does not install or encrypt anything
 
 ## Historical assessment baseline
 
-The current live checkpoint supplied from read-only phone inspection is the
-same October 12 kernel #5 boot (`760acab7`), with `/dev/sda36` as the ext4
-root and `cryptsetup` 2.8.8 present in the running root. Live `/proc/config.gz`
-still reports `DM_CRYPT` absent. The live root is therefore a plaintext ext4
-root and the fragment must not be treated as a migration or deployment step.
+The historical October 12 read-only checkpoint was kernel #5 boot
+(`760acab7`), with `/dev/sda36` as plaintext ext4 root and `cryptsetup` 2.8.8
+present. That kernel lacked `DM_CRYPT`. This describes the pre-conversion
+system, not the October 15 encrypted deployment.
 
 The repository's current early path independently shows the same limitation:
 the embedded initramfs finds GPT `userdata`, mounts it directly as ext4, and
@@ -306,7 +310,7 @@ and builds only an Image. The kernel release remains `7.1.2-r8q-rtc2` to
 match the exact existing touch bundle; `MODVERSIONS` is disabled. The payload
 contains that EFI Image and the unchanged active DTB. It has no flash, reboot,
 formatting, deployment or real-credential step. It intentionally cannot boot
-the phone's current plaintext USERDATA.
+plaintext USERDATA at that pre-conversion checkpoint.
 
 `scripts/validate-encryption-candidate.py` checks the produced ARM64 EFI
 header and confirms the generated compressed initramfs is actually embedded
@@ -356,7 +360,8 @@ markers; it does not prove that production systemd can boot the encrypted root.
 Pinned SSH verified the exact ROOT-HANDOFF2 PASS receipt and trial image hash,
 restored known EFI/DTB, normal root identity, lock baseline and services. The
 runtime acceptance is recorded in root-handoff-acceptance02.json; production
-systemd boot remains unproven until conversion and the first private boot.
+systemd boot was still unproven at that probe checkpoint; the deployed-root
+acceptance is recorded below.
 
 `scripts/prepare-encryption-probe.py` generates a distinct test-only early
 boot image from a supplied production staging tree and tool closure. It
@@ -385,15 +390,27 @@ boot credential; the four-digit screen PIN must never become a LUKS keyslot.
 
 ## October 15 deployed profile and recovery
 
-The actual USERDATA conversion completed with the reviewed LUKS2 header
-restore, recovery-key mapper open, ext4 creation, archive restore, clean fsck,
-and mapper cleanup. The corrected frozen02 overlay resume then passed at
-08:45 UTC, including the 297-entry baseline refresh and audited production EFI
-installation. The installed production EFI is pinned to
-`1a1944e9673d08944226da8c45c70dfee188a5e789d2ffec116a9dd012e8756f`.
-The first real encrypted-root boot is still waiting for the operator; boot
-activation, the one-wrong-phrase test, the private phrase, screen PIN, and
-hardware/service checks remain to be recorded.
+The USERDATA conversion completed with the reviewed LUKS2 header restore,
+recovery-key mapper open, ext4 creation, archive comparison, clean fsck and
+mapper cleanup. The frozen02 overlay repair passed at 08:45 UTC, including
+the 297-entry baseline refresh. The installed production04 EFI is pinned to
+`730627f49b8d41b9bdc6ef7931fe94911636003c61596c84d769d532ad27c49b`.
+Its CACHE-only update passed read-back and unmount checks.
+
+Production02 reached a decrypted root but stopped at a redundant chmod
+command absent from BusyBox. Production03 removed that dependency and reached
+systemd. Hyprland then failed because the early umask created `/run/udev` as
+0700. Changing only that temporary directory to 0755 restored the desktop and
+PIN screen. Production04 creates that directory with `mkdir -m 0755` while
+preserving umask 077 for credentials and the 0600 handoff marker. The actual
+ARM BusyBox mode fixture and all 17 protocol/tool tests passed. The fresh
+production04 boot passed without a runtime permission repair. The operator
+confirmed wrong boot-passphrase rejection, private boot unlock to the secure
+PIN screen, wrong-PIN rejection, correct unlock and side-button off/wake.
+Acceptance is retained in `out/encryption-implementation-20261013/` as
+`encrypted-root-final-acceptance04.json`, with exact artifact and transport
+receipt hashes. The accepted boot ID is
+`9296267e-edba-4c8f-8923-8f0395c52bfd`.
 
 Future kernel updates must preserve the encrypted-root initramfs, dm-crypt
 support, and the exact matching GPI/GENI/touch module bytes. The default
@@ -404,5 +421,6 @@ Recovery evidence is kept privately under
 and
 `/home/sierra/workfiles/private/s20-encryption-20261013/provisioning-received01`.
 The old plaintext migration and frozen01 scripts remain audit artifacts and
-must not be rerun against the encrypted root. The primary task will update this
-record after the first real boot and screen checks.
+must not be rerun against the encrypted root. Production04 preserves the
+separate strong boot credential and four-digit screen PIN. Firmware and EFI
+remain outside LUKS; the unlocked bootloader does not provide verified boot.

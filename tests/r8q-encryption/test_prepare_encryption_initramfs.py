@@ -338,6 +338,8 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         self.assertIn("umask 077", generated)
         self.assertIn("redirection-created marker mode 0600", generated)
         self.assertNotIn('chmod 0600 "$HANDOFF_MARKER"', generated)
+        self.assertIn("mkdir -m 0755 -p /run/udev", generated)
+        self.assertIn("mkdir -p /dev/mapper", generated)
         self.assertIn("FAIL CLOSED", generated)
         # The shipped probe BusyBox has integer sleep only (no fancy/fractional
         # sleep feature), so every generated wait must remain whole seconds.
@@ -386,6 +388,7 @@ printf 'unl0kr %s\\n' "$*" >> "$root/protocol.log"
         marker = fake_root / "run/r8q-encryption-adapter-handoff"
         marker_text = marker.read_text(encoding="utf-8")
         self.assertEqual(stat.S_IMODE(marker.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE((fake_root / "run/udev").stat().st_mode), 0o755)
         self.assertIn("schema=r8q-encryption-adapter-handoff/v1", marker_text)
         self.assertIn("boot_id=test-boot-id", marker_text)
         self.assertIn("gpi_ownership=inherited", marker_text)

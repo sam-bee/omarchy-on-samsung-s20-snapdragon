@@ -60,9 +60,10 @@ Run r8q-screen-lock status as alarm with the running desktop's Wayland,
 Hyprland and D-Bus environment. Use authenticated USB SSH for failures. Ending
 the lock client is not an unlock method: the compositor retains its failsafe.
 
-This protects the session. USERDATA remains plaintext until the separate
-encryption migration. The unlocked bootloader/recovery path remains a
-physical-access boundary, and session keys remain in memory.
+USERDATA was encrypted with LUKS2 on October 15; see
+[r8q-encryption.md](r8q-encryption.md) for its separate boot passphrase and
+recovery procedure. The unlocked bootloader/recovery path remains a
+physical-access boundary, and session keys remain in memory while running.
 
 ## Validation
 
@@ -86,6 +87,12 @@ Final acceptance and transport receipts are in the project log and ignored
 out/screen-lock-20261013 files. The configuration audit found only the 14
 expected changed paths across 296 prior protected entries; the new 294-path
 baseline retains the historical receipts and excludes credentials.
+
+After the October 15 LUKS conversion, a fresh production04 boot reached a
+compositor-confirmed secure native lock automatically. The operator repeated
+wrong-PIN rejection, correct unlock and physical side-button off/wake/unlock;
+all passed. The encryption acceptance receipt records the new boot and the
+unchanged 297-entry protected baseline.
 
 References: [WlSessionLock](https://quickshell.org/docs/v0.3.1/types/Quickshell.Wayland/WlSessionLock/),
 [PamContext](https://quickshell.org/docs/v0.3.1/types/Quickshell.Services.Pam/PamContext/),
