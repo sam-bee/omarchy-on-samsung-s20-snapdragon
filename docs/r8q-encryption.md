@@ -1,19 +1,18 @@
-# r8q encryption prerequisites and early-unlock plan
+# r8q encrypted root: implementation and recovery
 
 Date: 2026-10-15
 
-Current conversion checkpoint: USERDATA has been rewritten and converted to
-LUKS2. The backup was restored inside the encrypted filesystem and passed the
-full content/metadata comparison. Migration stopped during baseline refresh
-because its baseline checker rejected legitimate user-owned configuration
-files and Arch's `/lib -> usr/lib` alias for two protected module paths. The encrypted boot EFI has not yet been installed.
-Leave the phone in USB Mass Storage until the guarded overlay repair finishes;
-do not reboot the current incomplete deployment.
+Current conversion checkpoint: USERDATA is LUKS2, and its restored contents
+passed a full archive comparison. The reviewed baseline repair passed its
+archive-backed fixture and device execution, the filesystem checked cleanly,
+and the encrypted boot EFI is installed. The first private encrypted-root boot
+and final screen-lock checks are pending; do not treat preparation as runtime
+acceptance.
 
-The corrected public native PID1 probe, fresh cold backup, scratch restore,
-and block-FD fixture passed. Real encrypted-root systemd boot and final screen
-locking checks remain outstanding. The private backup and recovery material
-remain in the approved private laptop folder outside Syncthing.
+The public native PID1 probe, fresh cold backup, scratch restore and block-FD
+fixture passed. The private backup and recovery material remain in the approved
+private laptop folder outside Syncthing. The final baseline contains 297 paths,
+preserving the original user ownership and the two verified Arch `/lib` aliases.
 
 This document records the optional kernel prerequisites and isolated boot
 candidate tooling. The fragment
@@ -383,3 +382,27 @@ Both production and test init use bounded whole-second waits compatible
 with the minimal BusyBox build. Early touch must be unloaded before normal
 hardware services take over. Disk unlocking uses a separate strong private
 boot credential; the four-digit screen PIN must never become a LUKS keyslot.
+
+## October 15 deployed profile and recovery
+
+The actual USERDATA conversion completed with the reviewed LUKS2 header
+restore, recovery-key mapper open, ext4 creation, archive restore, clean fsck,
+and mapper cleanup. The corrected frozen02 overlay resume then passed at
+08:45 UTC, including the 297-entry baseline refresh and audited production EFI
+installation. The installed production EFI is pinned to
+`1a1944e9673d08944226da8c45c70dfee188a5e789d2ffec116a9dd012e8756f`.
+The first real encrypted-root boot is still waiting for the operator; boot
+activation, the one-wrong-phrase test, the private phrase, screen PIN, and
+hardware/service checks remain to be recorded.
+
+Future kernel updates must preserve the encrypted-root initramfs, dm-crypt
+support, and the exact matching GPI/GENI/touch module bytes. The default
+plaintext initramfs cannot boot this encrypted root.
+
+Recovery evidence is kept privately under
+`/home/sierra/workfiles/private/s20-encryption-20261013/cold-backup-20261015`
+and
+`/home/sierra/workfiles/private/s20-encryption-20261013/provisioning-received01`.
+The old plaintext migration and frozen01 scripts remain audit artifacts and
+must not be rerun against the encrypted root. The primary task will update this
+record after the first real boot and screen checks.
