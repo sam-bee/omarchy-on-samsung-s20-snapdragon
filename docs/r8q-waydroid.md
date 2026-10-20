@@ -10,6 +10,43 @@ boot and all thirteen functional regression checks passed. The operator
 confirmed the desktop and side-button PIN lock/unlock. Stereo playback
 passed; physical listening confirmation remains pending.
 
+## Runtime freeze investigation, October 20
+
+Adreno rendering works, but general Waydroid stability is not accepted. A
+calculator-recording attempt left Android's UI unresponsive and prevented
+new SSH sessions.
+After recovery, an instrumented recurrence happened during UIAutomator
+preflight before any recorder started. Capture was not required for that
+occurrence. Live kernel logs identify a prolonged CPU-3 RCU stall,
+unchanged idle/softirq counters and unanswered backtrace requests. Later
+cgroup/RCU waits block systemd and Wi-Fi administration while some existing
+processes continue. This is a kernel progress failure, not simply app lag.
+
+The signature matches the CPU idle-entry/wakeup failure already described in
+`rootfs/etc/tmpfiles.d/50-r8q-cpuidle.conf` and `r8q-noidle.sh`. After reboot,
+all eight deep states report `disable=1`; WFI remains enabled. The deep-state
+usage counters are nonzero from early boot, before the userspace mitigation
+runs. A short, thermally bounded trial of the existing per-core SCHED_IDLE
+spinner helper kept WFI/deep-state counters stationary and passed two
+calculator sums, workspace switching and launcher input without a new stall.
+This supports idle/wakeup involvement but is not a long-term fix or proof of
+the exact firmware, interrupt, timer or driver defect. The helper has power
+and heat costs and remains disabled for boot.
+
+No GPU settings, kernel, DTB or PIN policy were changed during this diagnosis.
+Normal lock/DPMS blanking also passed one recorder-free test. Final readback
+showed Android, recorder, spinners and temporary idle inhibitors stopped,
+the protected baseline passing and no failed Linux services. The
+unmodified kernel lacks pseudo-NMI, soft-lockup and hung-task diagnostics, so
+the original stalled CPU's instruction remains unknown. Further work should
+target CPU idle/wakeup and improve crash observability through a separately
+guarded kernel trial, rather than treating GPU selection as a stability fix.
+
+Full journals, resource streams, CPU-idle/interrupt samples and thermal
+receipts are retained under
+`out/waydroid-userspace-20261020/crash-20261020-1207/`. The project log records
+the reproduction and recovery sequence. The requested demo remains unfinished.
+
 ## Adreno acceleration, October 20
 
 Android now uses the Adreno 650. SurfaceFlinger reports
