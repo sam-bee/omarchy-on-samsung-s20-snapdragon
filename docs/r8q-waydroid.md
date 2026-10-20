@@ -21,27 +21,79 @@ its per-invocation `--disable-sandbox` option because this phone kernel lacks
 Landlock. No laptop package installation was needed.
 
 Official VANILLA ARM64 and MAINLINE images, both `lineage-20.0-20260927`,
-passed Waydroid download verification and extraction. Generated properties
-select memfd, GBM, Mesa and `/dev/dri/renderD128`. The sysfs GPU platform
-driver identifies as `adreno`, while its DRM driver remains `msm`; Waydroid
-1.6.3 does not automatically select the freedreno Vulkan property for this
-sysfs name. Hardware rendering is not yet established.
+passed download verification and extraction. The first automatic GBM/Mesa
+trial froze the phone shortly after a graphics-composer abort. The operator
+force-restarted and privately unlocked encrypted Linux. Previous-boot logs
+and pstore were preserved; no recorded kernel panic, Oops, OOM or GPU fault
+establishes the mechanism of the Linux freeze. The recovered boot is
+`85f6c7a9-4ba9-4d0b-98ba-d02bb1f7db44`.
 
-The container and an unprivileged session started at 10:49:33 UTC. The session
-uses the existing desktop's private D-Bus and `/run/r8q-desktop/wayland-1`.
-LXC reported RUNNING, but before Android boot completion could be established,
-USB and Wi-Fi stopped responding. The USB gadget remained enumerated and
-laptop routes were intact. Cause is unconfirmed; physical recovery and
-persistent kernel/container logs are the next diagnostic steps. The container
-service is disabled for boot and the trial session is transient.
+The working diagnostic configuration uses CPU rendering:
 
-Fossify Calculator 1.4.0 is staged on the phone at
+```ini
+[properties]
+ro.hardware.gralloc = default
+ro.hardware.egl = angle
+ro.hardware.vulkan = pastel
+```
+
+These drivers ship in the vendor image. This is the ANGLE/SwiftShader path
+described by the [official Android 13 vendor patch](https://github.com/waydroid/android_vendor_waydroid/blob/lineage-20/waydroid-patches/base-patches-33/system/core/0013-init-Substitute-swiftshader-with-angle-pastel-on-ven.patch).
+After `waydroid upgrade -o`, the trial also removes the two direct
+`/dev/dri/renderD128` and `/dev/fb0` mount entries from
+`/var/lib/waydroid/lxc/waydroid/config_nodes`. The host GPU module stays
+loaded. A later offline upgrade regenerates those entries; review the device
+mounts again before restarting Android after an upgrade. The pre-trial
+configuration is saved as
+`/var/lib/r8q-waydroid-trial/config-before-software.tar`.
+
+The unprivileged graphical session uses the existing desktop's private D-Bus,
+`XDG_RUNTIME_DIR=/run/r8q-desktop` and `WAYLAND_DISPLAY=wayland-1`. It reached
+Android user 0 ready and `sys.boot_completed=1`; SurfaceFlinger confirms the
+actual ANGLE/SwiftShader renderer. Hardware acceleration is not accepted.
+The sysfs GPU platform driver identifies as `adreno`, while its DRM driver
+remains `msm`; Waydroid 1.6.3 also misses automatic freedreno Vulkan selection
+for that sysfs name.
+
+Fossify Calculator 1.4.0/code 10, package `org.fossify.math`, is installed and
+tested. The verified source APK remains at
 `/home/alarm/Downloads/fossify-calculator-1.4.0.apk`. Its SHA-256 matches the
 upstream GitHub release asset digest
 `7c5443c22d6d62c67dfe80df33ea9161ff0fa440f92590bcb45d7008b57613ed`.
-It has not yet been installed inside Android or tested. Receipts are under
-`out/waydroid-userspace-20261020/`; phone package/network baselines and the
-desktop command helper are in `/var/lib/r8q-waydroid-trial/`.
+Actual UI button input produced `6 × 7 = 42`; UIAutomator and the independently
+viewed screenshot agree. The session/container stopped, LXC reported STOPPED
+and nftables returned to its empty baseline. A new session booted again,
+reopened the calculator and retained its `6×7`/`42` SQLite history row. The
+operator then physically tapped `C`, `2 + 2 =` and confirmed `4`.
+
+This accepts a basic offline Android app smoke test. Internet is not working:
+Android receives a DHCP address and reaches the bridge, but an external-IP
+ping reports Network is unreachable. A restart also recorded a composer
+abort (`Binder threadpool cannot be shrunk after starting`). The replacement
+composer and calculator respond, but SurfaceFlinger's init property remains
+`stopping`; graphics-service lifecycle and full stability need further work.
+The first boot also logged transient SystemUI errors and cgroup/task-profile
+warnings. Audio, typing, native-lock regression with Android running and
+hardware rendering are not accepted by this test.
+
+The calculator is left open for use. The container service is disabled for
+boot and the trial session is transient. Android data lives under
+`/home/alarm/.local/share/waydroid/data` on the encrypted root. From the
+existing alarm desktop, `waydroid show-full-ui` opens Android and
+`waydroid session stop` stops its session/container payload; root can also
+stop the manager with `systemctl stop waydroid-container.service`. Direct
+calculator launch with the Android shell is:
+
+```sh
+waydroid shell -- am start -W -n org.fossify.math/.activities.MainActivity
+```
+
+For UIAutomator, supply `EXTERNAL_STORAGE=/sdcard` through `waydroid shell --
+env`; its omission causes a Java initialization error. All 410 protected
+files and zero failed Linux services pass after recovery and app testing.
+Receipts and the screenshot are under `out/waydroid-userspace-20261020/`;
+phone package/network baselines and the desktop command helper are in
+`/var/lib/r8q-waydroid-trial/`.
 
 ## Kernel background
 
