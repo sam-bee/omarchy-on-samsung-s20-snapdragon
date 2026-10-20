@@ -782,7 +782,8 @@ def run_command(command: list[str], label: str) -> str:
     return result.stdout.strip()
 
 
-def validate_phone_identity(target_root: Path, fixture: bool) -> None:
+def validate_phone_identity(target_root: Path, fixture: bool,
+                            expected_release: str = CURRENT_RELEASE) -> None:
     if fixture:
         return
     require(os.geteuid() == 0 and target_root == Path("/"),
@@ -791,7 +792,8 @@ def validate_phone_identity(target_root: Path, fixture: bool) -> None:
     regular(machine_path, "phone machine-id")
     require(machine_path.read_text(encoding="ascii").strip() == MACHINE_ID,
             "phone machine identity differs")
-    require(os.uname().release == CURRENT_RELEASE, "current kernel is not Waydroid2")
+    require(os.uname().release == expected_release,
+            f"current kernel is not {expected_release}")
     require(run_command(["/usr/bin/findmnt", "-rn", "-o", "SOURCE", "/"],
                         "root source") == ROOT_SOURCE,
             "encrypted root source differs")
