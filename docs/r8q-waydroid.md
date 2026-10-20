@@ -10,6 +10,41 @@ boot and all thirteen functional regression checks passed. The operator
 confirmed the desktop and side-button PIN lock/unlock. Stereo playback
 passed; physical listening confirmation remains pending.
 
+## Userspace trial, October 20
+
+Waydroid 1.6.3-1 and nine new dependencies are installed on the accepted
+encrypted Waydroid2 root. No existing packages were upgraded. The retained
+repository snapshot had two unavailable packages; signed rsync 3.5.1-3 and
+libgbinder 1.1.54-1 from the official ARM mirror replaced those new dependency
+candidates. Their hashes and signatures passed verification. Pacman needed
+its per-invocation `--disable-sandbox` option because this phone kernel lacks
+Landlock. No laptop package installation was needed.
+
+Official VANILLA ARM64 and MAINLINE images, both `lineage-20.0-20260927`,
+passed Waydroid download verification and extraction. Generated properties
+select memfd, GBM, Mesa and `/dev/dri/renderD128`. The sysfs GPU platform
+driver identifies as `adreno`, while its DRM driver remains `msm`; Waydroid
+1.6.3 does not automatically select the freedreno Vulkan property for this
+sysfs name. Hardware rendering is not yet established.
+
+The container and an unprivileged session started at 10:49:33 UTC. The session
+uses the existing desktop's private D-Bus and `/run/r8q-desktop/wayland-1`.
+LXC reported RUNNING, but before Android boot completion could be established,
+USB and Wi-Fi stopped responding. The USB gadget remained enumerated and
+laptop routes were intact. Cause is unconfirmed; physical recovery and
+persistent kernel/container logs are the next diagnostic steps. The container
+service is disabled for boot and the trial session is transient.
+
+Fossify Calculator 1.4.0 is staged on the phone at
+`/home/alarm/Downloads/fossify-calculator-1.4.0.apk`. Its SHA-256 matches the
+upstream GitHub release asset digest
+`7c5443c22d6d62c67dfe80df33ea9161ff0fa440f92590bcb45d7008b57613ed`.
+It has not yet been installed inside Android or tested. Receipts are under
+`out/waydroid-userspace-20261020/`; phone package/network baselines and the
+desktop command helper are in `/var/lib/r8q-waydroid-trial/`.
+
+## Kernel background
+
 The network configuration targets the native nftables rules in
 [Waydroid 1.6.3's helper](https://raw.githubusercontent.com/waydroid/waydroid/1.6.3/data/scripts/waydroid-net.sh).
 Linux 7.1.2 builds its counter, payload, metadata and set expressions into
