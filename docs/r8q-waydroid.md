@@ -10,7 +10,66 @@ boot and all thirteen functional regression checks passed. The operator
 confirmed the desktop and side-button PIN lock/unlock. Stereo playback
 passed; physical listening confirmation remains pending.
 
-## Userspace trial, October 20
+## Adreno acceleration, October 20
+
+Android now uses the Adreno 650. SurfaceFlinger reports
+`GLES: freedreno, FD650, OpenGL ES 3.2 Mesa 26.0.8`; Android Vulkan properties
+identify Turnip. Actual render-node clients include Android's compositor,
+allocator, launcher and calculator. Native Linux already used Adreno; the
+earlier diagnostic Android session was running SwiftShader on the CPU.
+
+The accepted trial explicitly selects these settings in
+`/var/lib/waydroid/waydroid.cfg`:
+
+```ini
+[waydroid]
+drm_device = /dev/dri/renderD128
+
+[properties]
+ro.hardware.gralloc = gbm
+ro.hardware.egl = mesa
+ro.hardware.vulkan = freedreno
+```
+
+Merge these entries into the existing file rather than replacing its image,
+Binder or OTA settings. The Android 13 vendor image substitutes its
+`minigbm_gbm_mesa` allocator for the requested `gbm`. Explicit Vulkan selection
+avoids Waydroid 1.6.3's missed `adreno` sysfs-driver mapping. The underlying DRM
+driver is still `msm`.
+
+Retain the render-node bind mount in
+`/var/lib/waydroid/lxc/waydroid/config_nodes`, and remove direct `/dev/fb*` and
+`/dev/graphics/fb*` bind entries. Hyprland continues to own the simpledrm
+display; Android presents its rendered buffers through Wayland. The host GPU
+module and accepted kernel/boot payload are unchanged.
+
+For future configuration/image upgrades, stop the user session and container
+manager first. Run `waydroid upgrade -o` only while stopped, remove the
+regenerated framebuffer entries, inspect the retained render-node entry and
+generated graphics properties, then restart the manager and user session.
+Waydroid 1.6.3 has no framebuffer exclusion property; an in-process hot
+upgrade can regenerate those mounts without restarting the systemd manager.
+
+The calculator passed `6 × 7 = 42` with the hardware renderer. Two app-drawer
+open/close cycles recorded 135 launcher frames with a 12 ms median and 8
+janky frames (5.93%). These local samples are not a controlled comparison
+with the earlier software measurements. Accelerated startup and a subsequent
+Android restart both pass with running graphics services, an empty Android
+crash buffer, no observed GPU fault and zero failed host services. All 410
+protected-file checks pass. The operator confirms app opening and drawer
+gestures are noticeably quicker and smooth. The earlier startup freeze and
+composer threadpool abort remain historical issues whose exact trigger is
+unproven.
+
+The tested software configuration remains in
+`/var/lib/r8q-waydroid-gpu-trial/accepted-software-config.tar`, SHA-256
+`2cc1ffa6620bfead979786ef537f7fcd8a4e8f2b321d87b8b76f394d60315c20`.
+For graphics rollback, stop the session/manager and restore that archive into
+`/var/lib/waydroid`, retaining Android data. The adjacent `rollback.sh` also
+restores the original IPv4 forwarding value. GPU investigation receipts use
+the `gpu-` prefix under `out/waydroid-userspace-20261020/`.
+
+## Earlier userspace trial, October 20
 
 Waydroid 1.6.3-1 and nine new dependencies are installed on the accepted
 encrypted Waydroid2 root. No existing packages were upgraded. The retained
@@ -76,7 +135,7 @@ The first boot also logged transient SystemUI errors and cgroup/task-profile
 warnings. Audio, typing, native-lock regression with Android running and
 hardware rendering are not accepted by this test.
 
-The calculator is left open for use. The container service is disabled for
+The calculator was left open for use. The container service is disabled for
 boot and the trial session is transient. Android data lives under
 `/home/alarm/.local/share/waydroid/data` on the encrypted root. From the
 existing alarm desktop, `waydroid show-full-ui` opens Android and
